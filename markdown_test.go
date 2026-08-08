@@ -1,0 +1,198 @@
+package main
+
+import (
+	"strings"
+	"testing"
+)
+
+// --- setext headings -------------------------------------------------------
+
+func TestSetextHeadingsAreHeadings(t *testing.T) {
+	units := Parse("t.md", "Title one\n=========\n\nbody a\n\nTitle two\n---------\n\nbody b\n")
+	eq(t, kindsOf(units), []string{"heading@1", "paragraph@4", "heading@6", "paragraph@9"})
+}
+
+// The regression that motivated all of this: the same paragraph, the same
+// query, must report the section it lives under whichever heading syntax the
+// document uses. Before this, a setext document reported "(no section)" for
+// everything, and that reads as "this file has no structure".
+func TestSetextAndAtxAttributeTheSameHeading(t *testing.T) {
+	atx := Parse("t.md", "# Section\n\nbody text\n")
+	setext := Parse("t.md", "Section\n=======\n\nbody text\n")
+
+	var got [2]string
+	for i, units := range [][]Unit{atx, setext} {
+		for _, u := range units {
+			if u.Kind == "paragraph" {
+				got[i] = u.Heading
+			}
+		}
+	}
+	if got[0] == "" || got[1] == "" {
+		t.Fatalf("a paragraph came back with no section: atx=%q setext=%q", got[0], got[1])
+	}
+	if !strings.Contains(got[1], "Section") {
+		t.Errorf("setext heading not attributed: got %q", got[1])
+	}
+}
+
+// --- the ambiguity of "---" ------------------------------------------------
+
+func TestDashesAfterABlankLineAreNotAHeading(t *testing.T) {
+	units := Parse("t.md", "some text\n\n---\n\nmore text\n")
+	for _, u := range units {
+		if u.Kind == "heading" {
+			t.Fatalf("a thematic break became a heading: %v", kindsOf(units))
+		}
+	}
+}
+
+func TestATableSeparatorStaysInsideItsTable(t *testing.T) {
+	units := Parse("t.md", "| a | b |\n| --- | --- |\n| 1 | 2 |\n")
+	eq(t, kindsOf(units), []string{"table@1"})
+	if got := len(units[0].Lines); got != 3 {
+		t.Errorf("table lost rows to the separator: %d lines", got)
+	}
+}
+
+func TestADashListIsNotAnUnderline(t *testing.T) {
+	units := Parse("t.md", "intro line\n\n- first item\n- second item\n")
+	eq(t, kindsOf(units), []string{"paragraph@1", "item@3", "item@4"})
+}
+
+// --- front matter ----------------------------------------------------------
+
+func TestFrontMatterIsItsOwnKind(t *testing.T) {
+	units := Parse("t.md", "---\ntitle: A title\ntags: [x]\n---\n\nbody text\n")
+	eq(t, kindsOf(units), []string{"frontmatter@1", "paragraph@6"})
+}
+
+func TestFrontMatterOnlyCountsAtTheTop(t *testing.T) {
+	units := Parse("t.md", "body first\n\n---\ntitle: not front matter\n---\n")
+	if units[0].Kind == "frontmatter" {
+		t.Errorf("front matter recognised away from the top: %v", kindsOf(units))
+	}
+}
+
+func TestUnterminatedFrontMatterIsNotFrontMatter(t *testing.T) {
+	units := Parse("t.md", "---\ntitle: never closed\n\nbody\n")
+	for _, u := range units {
+		if u.Kind == "frontmatter" {
+			t.Errorf("an unterminated block was read as front matter: %v", kindsOf(units))
+		}
+	}
+}
+
+// --- indented code ---------------------------------------------------------
+
+func TestIndentedBlockIsCode(t *testing.T) {
+	units := Parse("t.md", "intro\n\n    indented line one\n    indented line two\n\ntail\n")
+	eq(t, kindsOf(units), []string{"paragraph@1", "code@3", "paragraph@6"})
+}
+
+// The trap named in the checkpoint: after a list item, the same indentation is
+// the item's own continuation. Calling it code would hide prose that a reader
+// sees as prose.
+func TestIndentedLinesAfterAListItemAreNotCode(t *testing.T) {
+	units := Parse("t.md", "- an item\n\n    continuation of the item\n")
+	for _, u := range units {
+		if u.Kind == "code" {
+			t.Fatalf("a list continuation became code: %v", kindsOf(units))
+		}
+	}
+}
+
+func TestIndentedCodeDoesNotSwallowTheFollowingParagraph(t *testing.T) {
+	units := Parse("t.md", "    code line\n\nprose after the block\n")
+	eq(t, kindsOf(units), []string{"code@1", "paragraph@3"})
+}
+
+// --- links -----------------------------------------------------------------
+
+func TestLinkModes(t *testing.T) {
+	const in = "see [the whole idea](https://example.com/x) continues"
+	cases := []struct{ mode, want string }{
+		{LinksText, "see the whole idea continues"},
+		{LinksURL, "see https://example.com/x continues"},
+		{LinksBoth, "see the whole idea https://example.com/x continues"},
+	}
+	for _, c := range cases {
+		if got := NormalizeWith(in, c.mode); got != c.want {
+			t.Errorf("NormalizeWith(%s) = %q, want %q", c.mode, got, c.want)
+		}
+	}
+}
+
+// The second construct, after emphasis, that splits a phrase nobody wrote as
+// split.
+func TestPhraseAcrossALinkIsReachable(t *testing.T) {
+	units := Parse("t.md", "text with [a descriptive label](https://example.com/very/long)\nand the phrase continues.\n")
+	if !strings.Contains(units[0].Flat(), "a descriptive label and the phrase continues") {
+		t.Errorf("the URL still splits the phrase: %q", units[0].Flat())
+	}
+}
+
+func TestImagesAndReferenceLinksResolveToTheirText(t *testing.T) {
+	if got, want := Normalize("![alt text](img.png) after"), "alt text after"; got != want {
+		t.Errorf("image: got %q, want %q", got, want)
+	}
+	if got, want := Normalize("a [ref label][1] here"), "a ref label here"; got != want {
+		t.Errorf("reference link: got %q, want %q", got, want)
+	}
+	if got, want := Normalize("bare <https://example.com/a> link"), "bare https://example.com/a link"; got != want {
+		t.Errorf("autolink: got %q, want %q", got, want)
+	}
+}
+
+func TestLinkTitleIsDropped(t *testing.T) {
+	if got, want := Normalize(`[label](http://x "the title") tail`), "label tail"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+// --- kind selection --------------------------------------------------------
+
+func TestKindAllowedAcceptsAList(t *testing.T) {
+	cases := []struct {
+		kind, spec string
+		want       bool
+	}{
+		{"item", "", true},
+		{"item", "any", true},
+		{"item", "item", true},
+		{"item", "paragraph,item", true},
+		{"item", "paragraph, item", true},
+		{"item", "paragraph,code", false},
+		{"frontmatter", "frontmatter", true},
+	}
+	for _, c := range cases {
+		if got := kindAllowed(c.kind, c.spec); got != c.want {
+			t.Errorf("kindAllowed(%q, %q) = %v, want %v", c.kind, c.spec, got, c.want)
+		}
+	}
+}
+
+func TestCheckKindsRejectsATypo(t *testing.T) {
+	if err := checkKinds("paragraph,itemm"); err == nil {
+		t.Error("an unknown kind must be refused, not silently match nothing")
+	}
+	if err := checkKinds("paragraph,item,any"); err != nil {
+		t.Errorf("a valid list was refused: %v", err)
+	}
+	for _, k := range Kinds {
+		if err := checkKinds(k); err != nil {
+			t.Errorf("documented kind %q refused: %v", k, err)
+		}
+	}
+}
+
+func TestCheckLinksRejectsATypo(t *testing.T) {
+	if err := checkLinks("texts"); err == nil {
+		t.Error("an unknown --links mode must be refused")
+	}
+	for _, m := range []string{"", LinksText, LinksURL, LinksBoth} {
+		if err := checkLinks(m); err != nil {
+			t.Errorf("valid mode %q refused: %v", m, err)
+		}
+	}
+}

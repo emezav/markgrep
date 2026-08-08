@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -15,14 +16,29 @@ type Unit struct {
 	Path    string
 	Line    int    // 1-based, first line of the unit
 	Heading string // nearest section heading above it
-	Kind    string // paragraph | item | code | table | heading | quote
+	Kind    string // paragraph | item | code | table | heading | quote | frontmatter
 	Lines   []string
 }
+
+// Kinds are every value Kind can take. It exists so that --kind can reject a
+// name it does not know instead of matching nothing: an unknown kind that
+// silently returns zero is the false absence this tool exists to remove.
+var Kinds = []string{"paragraph", "item", "code", "table", "heading", "quote", "frontmatter"}
+
+// Link modes decide what the text of a link contributes to the searchable form.
+const (
+	LinksText = "text" // [text](url) -> text        (default)
+	LinksURL  = "url"  // [text](url) -> url
+	LinksBoth = "both" // [text](url) -> text url
+)
 
 // Raw returns the unit exactly as written.
 func (u Unit) Raw() string { return strings.Join(u.Lines, "\n") }
 
-// Flat returns the unit ready to be searched: newlines collapsed to spaces,
+// Flat returns the unit ready to be searched, resolving links to their text.
+func (u Unit) Flat() string { return u.FlatWith(LinksText) }
+
+// FlatWith returns the unit ready to be searched: newlines collapsed to spaces,
 // runs of whitespace reduced to one, and inline markup removed.
 //
 // Collapsing newlines kills hard wrapping. Removing markup kills a subtler
@@ -34,13 +50,43 @@ func (u Unit) Raw() string { return strings.Join(u.Lines, "\n") }
 // Underscores are left alone on purpose: in technical prose they are part of
 // identifiers (audit_log, max_retries) and stripping them would break the
 // queries that do work.
-func (u Unit) Flat() string {
-	return Normalize(strings.Join(u.Lines, " "))
+func (u Unit) FlatWith(links string) string {
+	return NormalizeWith(strings.Join(u.Lines, " "), links)
 }
+
+var (
+	// [text](url) and ![alt](url), with an optional title after the URL.
+	reInlineLink = regexp.MustCompile(`!?\[([^\]]*)\]\(\s*<?([^)>\s]*)>?[^)]*\)`)
+	// [text][ref] and [text][], which carry no URL of their own.
+	reRefLink = regexp.MustCompile(`!?\[([^\]]*)\]\[[^\]]*\]`)
+	// <https://example.com>, where the URL is also the visible text.
+	reAutolink = regexp.MustCompile(`<((?:https?|ftp|mailto):[^>\s]+)>`)
+)
 
 // Normalize is applied to the text always, and to the pattern only in literal
 // mode. Applying it to a regular expression eats its operators.
-func Normalize(s string) string {
+func Normalize(s string) string { return NormalizeWith(s, LinksText) }
+
+// NormalizeWith is Normalize with the link mode made explicit.
+//
+// A link is the second construct, after inline emphasis, that splits a phrase
+// nobody wrote as split: `[the whole idea](https://example.com/x) continues`
+// puts a URL between two words that read as consecutive. Resolving the link to
+// its visible text lets the phrase flow, which is the same reason newlines are
+// collapsed. The URL is still reachable with --links url or --links both.
+func NormalizeWith(s, links string) string {
+	switch links {
+	case LinksURL:
+		s = reInlineLink.ReplaceAllString(s, "$2")
+		s = reRefLink.ReplaceAllString(s, "")
+	case LinksBoth:
+		s = reInlineLink.ReplaceAllString(s, "$1 $2")
+		s = reRefLink.ReplaceAllString(s, "$1")
+	default: // LinksText
+		s = reInlineLink.ReplaceAllString(s, "$1")
+		s = reRefLink.ReplaceAllString(s, "$1")
+	}
+	s = reAutolink.ReplaceAllString(s, "$1")
 	s = strings.NewReplacer("*", "", "`", "", "~", "").Replace(s)
 	return strings.Join(strings.Fields(s), " ")
 }
@@ -51,6 +97,31 @@ func isHeading(l string) (string, bool) {
 		return strings.TrimSpace(t), true
 	}
 	return "", false
+}
+
+// isSetextUnderline reports the level a line underlines: 1 for a run of '=', 2
+// for a run of '-', 0 for anything else.
+//
+// The caller only asks about a line that already has paragraph text above it,
+// and that is what makes the answer safe. On its own a run of dashes is a
+// thematic break; under text it is a heading. A table separator starts with
+// '|' and a list item needs a space after its marker, so neither reaches here
+// looking like an underline.
+func isSetextUnderline(l string) int {
+	if len(l)-len(strings.TrimLeft(l, " ")) > 3 {
+		return 0 // four spaces in means indented code, not an underline
+	}
+	t := strings.TrimRight(strings.TrimLeft(l, " "), " \t")
+	if t == "" {
+		return 0
+	}
+	if strings.Trim(t, "=") == "" {
+		return 1
+	}
+	if strings.Trim(t, "-") == "" {
+		return 2
+	}
+	return 0
 }
 
 func isListItem(l string) bool {
@@ -67,6 +138,32 @@ func isListItem(l string) bool {
 
 func isTableRow(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), "|") }
 func isQuote(l string) bool    { return strings.HasPrefix(strings.TrimLeft(l, " "), ">") }
+func isFence(l string) bool    { return strings.HasPrefix(strings.TrimLeft(l, " "), "```") }
+
+// isIndentedCode reports the four-space (or tab) form of a code block. It is
+// only ever asked at the start of a block, because an indented line in the
+// middle of one is a continuation, not code.
+func isIndentedCode(l string) bool {
+	return strings.HasPrefix(l, "    ") || strings.HasPrefix(l, "\t")
+}
+
+// frontMatter returns the length in lines of a YAML front matter block, or 0.
+//
+// It only counts at the very top of the file, and that restriction is the whole
+// safety of it: three dashes anywhere else are a thematic break or a setext
+// underline, and reading them as metadata would swallow prose.
+func frontMatter(lines []string) int {
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "---" {
+		return 0
+	}
+	for j := 1; j < len(lines); j++ {
+		switch strings.TrimSpace(lines[j]) {
+		case "---", "...":
+			return j + 1
+		}
+	}
+	return 0 // unterminated: not front matter, let it parse as whatever it is
+}
 
 // Parse splits a markdown document into units. The rules are deliberately
 // simple: more fidelity to the spec would buy nothing for what this does.
@@ -76,20 +173,27 @@ func Parse(path string, content string) []Unit {
 	heading := ""
 
 	i := 0
+	if n := frontMatter(lines); n > 0 {
+		out = append(out, Unit{path, 1, "", "frontmatter", lines[0:n]})
+		i = n
+	}
+
+	lastKind := ""
 	for i < len(lines) {
 		l := lines[i]
 
-		if strings.HasPrefix(strings.TrimLeft(l, " "), "```") {
+		if isFence(l) {
 			start := i
 			i++
 			for i < len(lines) {
-				fence := strings.HasPrefix(strings.TrimLeft(lines[i], " "), "```")
+				fence := isFence(lines[i])
 				i++
 				if fence {
 					break
 				}
 			}
 			out = append(out, Unit{path, start + 1, heading, "code", lines[start:i]})
+			lastKind = "code"
 			continue
 		}
 
@@ -102,6 +206,25 @@ func Parse(path string, content string) []Unit {
 			heading = h
 			out = append(out, Unit{path, i + 1, heading, "heading", []string{l}})
 			i++
+			lastKind = "heading"
+			continue
+		}
+
+		// An indented block is code only when it opens a block of its own. After
+		// a list item the same indentation is the item's continuation, and
+		// calling it code would hide prose that a reader sees as prose.
+		if lastKind != "item" && isIndentedCode(l) {
+			start := i
+			last := i
+			for i < len(lines) && (strings.TrimSpace(lines[i]) == "" || isIndentedCode(lines[i])) {
+				if strings.TrimSpace(lines[i]) != "" {
+					last = i
+				}
+				i++
+			}
+			i = last + 1
+			out = append(out, Unit{path, start + 1, heading, "code", lines[start:i]})
+			lastKind = "code"
 			continue
 		}
 
@@ -117,6 +240,7 @@ func Parse(path string, content string) []Unit {
 
 		start := i
 		i++
+		setext := 0
 		for i < len(lines) {
 			s := lines[i]
 			if strings.TrimSpace(s) == "" {
@@ -125,7 +249,7 @@ func Parse(path string, content string) []Unit {
 			if _, ok := isHeading(s); ok {
 				break
 			}
-			if strings.HasPrefix(strings.TrimLeft(s, " "), "```") {
+			if isFence(s) {
 				break
 			}
 			if kind == "item" && isListItem(s) {
@@ -137,9 +261,24 @@ func Parse(path string, content string) []Unit {
 			if kind == "table" && !isTableRow(s) {
 				break
 			}
+			if kind == "paragraph" {
+				if lvl := isSetextUnderline(s); lvl > 0 {
+					setext = lvl
+					i++ // the underline belongs to the heading
+					break
+				}
+			}
 			i++
 		}
+
+		if setext > 0 {
+			heading = strings.TrimSpace(strings.Join(lines[start:i-1], " "))
+			out = append(out, Unit{path, start + 1, heading, "heading", lines[start:i]})
+			lastKind = "heading"
+			continue
+		}
 		out = append(out, Unit{path, start + 1, heading, kind, lines[start:i]})
+		lastKind = kind
 	}
 	return out
 }

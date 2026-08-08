@@ -118,6 +118,32 @@ Where grep says *line*, read *unit*: `-e`, `-f`, `-F`, `-v`, `-l`, `-c`, `-i`, `
 **One deliberate difference:** search is **case insensitive by default**. On a prose
 corpus that is what serves; ask for sensitivity with `-s`.
 
+### Flags of its own
+
+| Flag | What it does |
+| --- | --- |
+| `--in PATH` | File or directory; default `.` |
+| `--kind KIND[,...]` | Restrict to one or more unit kinds: `paragraph`, `item`, `code`, `table`, `heading`, `quote`, `frontmatter`, or `any` |
+| `--links MODE` | What a `[text](url)` contributes to the searchable form: `text` (default), `url`, or `both` |
+| `--raw` | Print the unit with its line breaks instead of flattened |
+
+**A name it does not know is refused, not ignored.** `--kind paragrph` exits 2 with the
+list of valid kinds, because filtering everything out and reporting zero is
+indistinguishable from a corpus that genuinely lacks the phrase — which is the exact
+failure this tool exists to remove.
+
+**Links resolve to their visible text by default**, so a phrase flows across them:
+
+```console
+$ markgrep search -F -e "the whole idea continues" --in notes.md
+notes.md:12  [paragraph]  ## Notes
+  | text with the whole idea continues past the link
+```
+
+Without that, the URL sits between "idea" and "continues" and the query returns
+nothing — the same false absence a hard wrap produces. Ask for the URLs with
+`--links url`, or for both with `--links both`.
+
 ### Flags deliberately not implemented
 
 `-A`, `-B`, `-C` and `-o` belong to the line model. Here **the context is the unit
@@ -165,17 +191,26 @@ a 1989 one.
 
 ## Roadmap
 
-Markdown awareness is **shallow today** and that is the direction of the project,
-stated plainly rather than implied:
+Markdown awareness is the direction of the project, stated plainly rather than
+implied. What has landed:
 
-- links: match the text, the URL, or both — today neither is handled specially
+- **setext headings** (`Title` over `=====` or `-----`). Before this, a document
+  written that way reported `(no section)` for every match — the headline feature
+  failing silently on a whole syntax.
+- **links**: match the text, the URL, or both (`--links`), so a phrase crosses a link
+  the way it crosses a hard wrap.
+- **YAML front matter** as its own kind, so metadata stops arriving as prose.
+- **indented code blocks** typed as `code` instead of parsed as paragraphs.
+
+What is still shallow:
+
 - inline code versus fenced blocks
-- YAML front matter
+- **whether a fenced block should be flattened at all.** Inside a fence a newline
+  carries meaning, so a phrase crossing two lines of a command arguably does not
+  exist. Today it matches. Changing it would change what `--kind code` returns, so it
+  is a contract decision and not a fix.
 - table cells as units of their own
 - embedded HTML
-
-Until those land, "markdown-aware" means *heading, markup and unit kind*, and
-nothing more.
 
 ## Design notes
 

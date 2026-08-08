@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const version = "0.1.0"
+const version = "0.2.0"
 
 const usage = `markgrep ` + version + ` — grep for markdown prose: searches units, not lines.
 
@@ -30,7 +30,8 @@ read "unit"):
 
 Own:
   --in PATH        file or directory (default: .)
-  --kind KIND      paragraph | item | code | table | heading | quote | any
+  --kind KIND[,..] paragraph | item | code | table | heading | quote | frontmatter | any
+  --links MODE     text (default) | url | both -- what a [text](url) contributes
   --raw            print the unit with its line breaks; flattened by default
 
 ONE DELIBERATE DIFFERENCE from grep: search is case INSENSITIVE by default. On a
@@ -73,6 +74,40 @@ func main() {
 		fmt.Print(usage)
 		os.Exit(0)
 	}
+}
+
+// checkKinds validates a --kind spec against the known kinds.
+//
+// The alternative is worse than it looks: an unknown name filters every unit
+// out and the run reports zero matches, which is indistinguishable from a
+// corpus that genuinely does not contain the phrase. That is the exact failure
+// this tool exists to remove, so it must not be the way a typo behaves.
+func checkKinds(spec string) error {
+	if spec == "" || spec == "any" {
+		return nil
+	}
+	for _, k := range strings.Split(spec, ",") {
+		k = strings.TrimSpace(k)
+		known := k == "any"
+		for _, valid := range Kinds {
+			if k == valid {
+				known = true
+			}
+		}
+		if !known {
+			return fmt.Errorf("unknown --kind %q; known kinds: %s, any",
+				k, strings.Join(Kinds, ", "))
+		}
+	}
+	return nil
+}
+
+func checkLinks(mode string) error {
+	switch mode {
+	case "", LinksText, LinksURL, LinksBoth:
+		return nil
+	}
+	return fmt.Errorf("unknown --links %q; use %s, %s or %s", mode, LinksText, LinksURL, LinksBoth)
 }
 
 func at(args []string, i int) string {
@@ -121,6 +156,9 @@ func cmdSearch(args []string) {
 		case "--kind":
 			o.Kind = at(args, i+1)
 			i++
+		case "--links":
+			o.Links = at(args, i+1)
+			i++
 		case "--raw":
 			raw = true
 		default:
@@ -134,6 +172,16 @@ func cmdSearch(args []string) {
 	}
 	if len(pats) == 0 {
 		fmt.Fprintln(os.Stderr, "at least one pattern is required (-e/-f)")
+		os.Exit(2)
+	}
+	// A name we do not know would filter everything out and report zero, which
+	// reads exactly like "there is nothing there". Refuse instead.
+	if err := checkKinds(o.Kind); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+	}
+	if err := checkLinks(o.Links); err != nil {
+		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
 

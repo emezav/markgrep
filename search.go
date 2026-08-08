@@ -27,6 +27,21 @@ type Options struct {
 	Kind      string
 	Include   string
 	Exclude   string
+	Links     string // text | url | both; empty means text
+}
+
+// kindAllowed reports whether a unit kind passes the --kind spec, which is a
+// comma-separated list. Empty or "any" lets everything through.
+func kindAllowed(kind, spec string) bool {
+	if spec == "" || spec == "any" {
+		return true
+	}
+	for _, k := range strings.Split(spec, ",") {
+		if strings.TrimSpace(k) == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // compile turns phrasings into expressions.
@@ -45,7 +60,7 @@ func compile(patterns []string, o Options) ([]*regexp.Regexp, error) {
 	for _, p := range patterns {
 		expr := p
 		if o.Literal {
-			expr = regexp.QuoteMeta(Normalize(p))
+			expr = regexp.QuoteMeta(NormalizeWith(p, o.Links))
 		}
 		if !o.CaseSens {
 			expr = "(?i)" + expr
@@ -71,10 +86,10 @@ func Search(units []Unit, patterns []string, o Options) ([]Match, error) {
 	}
 	var out []Match
 	for _, u := range units {
-		if o.Kind != "" && o.Kind != "any" && u.Kind != o.Kind {
+		if !kindAllowed(u.Kind, o.Kind) {
 			continue
 		}
-		flat := u.Flat()
+		flat := u.FlatWith(o.Links)
 		var hits []string
 		for i, re := range res {
 			if re.MatchString(flat) {
@@ -142,7 +157,7 @@ func PrintMatches(w io.Writer, ms []Match, patterns []string, root string, raw b
 		}
 		text := m.U.Raw()
 		if !raw {
-			text = clip(m.U.Flat(), 600)
+			text = clip(m.U.FlatWith(o.Links), 600)
 		}
 		for _, l := range strings.Split(text, "\n") {
 			fmt.Fprintf(w, "  | %s\n", l)
