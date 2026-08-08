@@ -1,0 +1,4 @@
+markgrep
+markgrep.exe
+*.exe
+dist/
