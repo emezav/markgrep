@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const version = "0.2.0"
+const version = "0.3.0"
 
 const usage = `markgrep ` + version + ` — grep for markdown prose: searches units, not lines.
 
@@ -30,7 +30,8 @@ read "unit"):
 
 Own:
   --in PATH        file or directory (default: .)
-  --kind KIND[,..] paragraph | item | code | table | heading | quote | frontmatter | any
+  --kind KIND[,..] paragraph | item | code | table | heading | quote | frontmatter | html | any
+                   one unit per table ROW; unknown names are refused, not ignored
   --links MODE     text (default) | url | both -- what a [text](url) contributes
   --raw            print the unit with its line breaks; flattened by default
 

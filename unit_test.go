@@ -68,9 +68,11 @@ func TestParseKindsAndBoundaries(t *testing.T) {
 	}, "\n")
 
 	units := Parse("t.md", doc)
+	// Line 14 is the separator and never becomes a unit; lines 13 and 15 are one
+	// unit each, which is the contract change of 2026-08-08.
 	eq(t, kindsOf(units), []string{
 		"heading@1", "paragraph@3", "item@6", "item@8",
-		"quote@10", "table@13", "code@17", "paragraph@21",
+		"quote@10", "table@13", "table@15", "code@17", "paragraph@21",
 	})
 }
 

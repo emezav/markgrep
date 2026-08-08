@@ -47,11 +47,16 @@ func TestDashesAfterABlankLineAreNotAHeading(t *testing.T) {
 	}
 }
 
-func TestATableSeparatorStaysInsideItsTable(t *testing.T) {
+// A run of dashes inside a table is its separator, never a setext underline and
+// never a thematic break. It is dropped, and the rows around it survive as
+// units of their own.
+func TestATableSeparatorIsDroppedAndTheRowsSurvive(t *testing.T) {
 	units := Parse("t.md", "| a | b |\n| --- | --- |\n| 1 | 2 |\n")
-	eq(t, kindsOf(units), []string{"table@1"})
-	if got := len(units[0].Lines); got != 3 {
-		t.Errorf("table lost rows to the separator: %d lines", got)
+	eq(t, kindsOf(units), []string{"table@1", "table@3"})
+	for _, u := range units {
+		if u.Kind != "table" {
+			t.Errorf("the separator turned a row into %q", u.Kind)
+		}
 	}
 }
 

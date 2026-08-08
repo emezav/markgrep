@@ -123,7 +123,7 @@ corpus that is what serves; ask for sensitivity with `-s`.
 | Flag | What it does |
 | --- | --- |
 | `--in PATH` | File or directory; default `.` |
-| `--kind KIND[,...]` | Restrict to one or more unit kinds: `paragraph`, `item`, `code`, `table`, `heading`, `quote`, `frontmatter`, or `any` |
+| `--kind KIND[,...]` | Restrict to one or more unit kinds: `paragraph`, `item`, `code`, `table`, `heading`, `quote`, `frontmatter`, `html`, or `any` |
 | `--links MODE` | What a `[text](url)` contributes to the searchable form: `text` (default), `url`, or `both` |
 | `--raw` | Print the unit with its line breaks instead of flattened |
 
@@ -202,15 +202,25 @@ implied. What has landed:
 - **YAML front matter** as its own kind, so metadata stops arriving as prose.
 - **indented code blocks** typed as `code` instead of parsed as paragraphs.
 
-What is still shallow:
+- **a table row is a unit**, so a hit in a forty-row table returns that row and not
+  the other thirty-nine. The separator row carries no content and is dropped.
+  **Deviation from what this roadmap used to promise**, and it is deliberate: it said
+  *cells*, and a cell is rarely a unit of meaning while a row is the record. Cell
+  granularity would also break phrases that read across a row.
+- **embedded HTML**: block elements and comments are their own kind, `html`, so hidden
+  markup stops arriving as prose; and inline tags no longer split a phrase —
+  `an <b>important</b> idea` matches `an important idea`, the same way a link does.
+  A bare `<` in prose (`a < b`) is left alone.
+- **inline code versus fenced blocks** is settled: inline code lives inside its
+  paragraph with the backticks stripped, while fenced *and* four-space indented blocks
+  are both `--kind code`.
 
-- inline code versus fenced blocks
+What is still open:
+
 - **whether a fenced block should be flattened at all.** Inside a fence a newline
   carries meaning, so a phrase crossing two lines of a command arguably does not
   exist. Today it matches. Changing it would change what `--kind code` returns, so it
-  is a contract decision and not a fix.
-- table cells as units of their own
-- embedded HTML
+  is a contract decision waiting on a real use case, not a fix.
 
 ## Design notes
 

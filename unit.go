@@ -16,14 +16,14 @@ type Unit struct {
 	Path    string
 	Line    int    // 1-based, first line of the unit
 	Heading string // nearest section heading above it
-	Kind    string // paragraph | item | code | table | heading | quote | frontmatter
+	Kind    string // paragraph | item | code | table | heading | quote | frontmatter | html
 	Lines   []string
 }
 
 // Kinds are every value Kind can take. It exists so that --kind can reject a
 // name it does not know instead of matching nothing: an unknown kind that
 // silently returns zero is the false absence this tool exists to remove.
-var Kinds = []string{"paragraph", "item", "code", "table", "heading", "quote", "frontmatter"}
+var Kinds = []string{"paragraph", "item", "code", "table", "heading", "quote", "frontmatter", "html"}
 
 // Link modes decide what the text of a link contributes to the searchable form.
 const (
@@ -61,6 +61,11 @@ var (
 	reRefLink = regexp.MustCompile(`!?\[([^\]]*)\]\[[^\]]*\]`)
 	// <https://example.com>, where the URL is also the visible text.
 	reAutolink = regexp.MustCompile(`<((?:https?|ftp|mailto):[^>\s]+)>`)
+	// A line break written as a tag separates words and must leave a space.
+	reBreakTag = regexp.MustCompile(`(?i)<(?:br|hr)\s*/?>`)
+	// Any other well-formed tag. It must start with a letter, which is what
+	// keeps prose like "a < b" and "5 <= 6" out of its reach.
+	reHTMLTag = regexp.MustCompile(`</?[a-zA-Z][a-zA-Z0-9-]*(?:\s[^<>]*)?/?>`)
 )
 
 // Normalize is applied to the text always, and to the pattern only in literal
@@ -86,7 +91,15 @@ func NormalizeWith(s, links string) string {
 		s = reInlineLink.ReplaceAllString(s, "$1")
 		s = reRefLink.ReplaceAllString(s, "$1")
 	}
+	// Autolinks first: <https://x> starts with a letter after the angle bracket
+	// and would otherwise be mistaken for a tag and dropped.
 	s = reAutolink.ReplaceAllString(s, "$1")
+	// A tag is the third construct, after emphasis and links, that splits a
+	// phrase nobody wrote as split: "an <b>important</b> idea". Removing it
+	// leaves the words adjacent, which is what a reader sees. A break tag is
+	// the exception -- it separates, so it leaves a space behind.
+	s = reBreakTag.ReplaceAllString(s, " ")
+	s = reHTMLTag.ReplaceAllString(s, "")
 	s = strings.NewReplacer("*", "", "`", "", "~", "").Replace(s)
 	return strings.Join(strings.Fields(s), " ")
 }
@@ -137,8 +150,29 @@ func isListItem(l string) bool {
 }
 
 func isTableRow(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), "|") }
-func isQuote(l string) bool    { return strings.HasPrefix(strings.TrimLeft(l, " "), ">") }
-func isFence(l string) bool    { return strings.HasPrefix(strings.TrimLeft(l, " "), "```") }
+
+// isTableSeparator reports the `| --- | --- |` row under a table header. It
+// carries no content, so it never becomes a unit of its own.
+func isTableSeparator(l string) bool {
+	t := strings.TrimSpace(l)
+	if !strings.HasPrefix(t, "|") {
+		return false
+	}
+	return strings.Trim(t, "|-: \t") == "" && strings.Contains(t, "-")
+}
+
+// isHTMLBlockStart reports a line that opens a block-level HTML element or an
+// HTML comment. A tag in the middle of a sentence is inline markup, not a
+// block, so this is only ever asked at the start of a block.
+func isHTMLBlockStart(l string) bool {
+	t := strings.TrimLeft(l, " ")
+	if strings.HasPrefix(t, "<!--") {
+		return true
+	}
+	return reHTMLTag.MatchString(t) && strings.HasPrefix(t, "<")
+}
+func isQuote(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), ">") }
+func isFence(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), "```") }
 
 // isIndentedCode reports the four-space (or tab) form of a code block. It is
 // only ever asked at the start of a block, because an indented line in the
@@ -210,6 +244,52 @@ func Parse(path string, content string) []Unit {
 			continue
 		}
 
+		// An HTML block, and the comment form needs the same state a fence needs.
+		// An unterminated comment is NOT a block: it falls through and parses as
+		// prose, which is the same refusal frontMatter makes, and for the same
+		// reason -- the alternative swallows the rest of the document.
+		if isHTMLBlockStart(l) {
+			start := i
+			if strings.HasPrefix(strings.TrimLeft(l, " "), "<!--") {
+				j, closed := i, false
+				for j < len(lines) {
+					done := strings.Contains(lines[j], "-->")
+					j++
+					if done {
+						closed = true
+						break
+					}
+				}
+				if closed {
+					out = append(out, Unit{path, start + 1, heading, "html", lines[start:j]})
+					i = j
+					lastKind = "html"
+					continue
+				}
+			} else {
+				j := i
+				for j < len(lines) && strings.TrimSpace(lines[j]) != "" {
+					j++
+				}
+				out = append(out, Unit{path, start + 1, heading, "html", lines[start:j]})
+				i = j
+				lastKind = "html"
+				continue
+			}
+		}
+
+		// One unit per table ROW, not one per table. A hit in a forty-row table
+		// used to return all forty. The separator carries no content, so it is
+		// skipped rather than made into an empty unit.
+		if isTableRow(l) {
+			if !isTableSeparator(l) {
+				out = append(out, Unit{path, i + 1, heading, "table", []string{l}})
+				lastKind = "table"
+			}
+			i++
+			continue
+		}
+
 		// An indented block is code only when it opens a block of its own. After
 		// a list item the same indentation is the item's continuation, and
 		// calling it code would hide prose that a reader sees as prose.
@@ -232,8 +312,6 @@ func Parse(path string, content string) []Unit {
 		switch {
 		case isListItem(l):
 			kind = "item"
-		case isTableRow(l):
-			kind = "table"
 		case isQuote(l):
 			kind = "quote"
 		}
@@ -255,10 +333,7 @@ func Parse(path string, content string) []Unit {
 			if kind == "item" && isListItem(s) {
 				break
 			}
-			if kind != "table" && isTableRow(s) {
-				break
-			}
-			if kind == "table" && !isTableRow(s) {
+			if isTableRow(s) {
 				break
 			}
 			if kind == "paragraph" {
