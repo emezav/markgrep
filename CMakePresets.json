@@ -1,0 +1,88 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 21,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release (host)",
+      "description": "Stripped, reproducible build for the current OS and architecture",
+      "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug (host)",
+      "description": "Keeps the symbol table so delve can attach",
+      "binaryDir": "${sourceDir}/build-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "linux-amd64",
+      "displayName": "Cross: linux/amd64",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build-linux-amd64",
+      "cacheVariables": {
+        "MARKGREP_GOOS": "linux",
+        "MARKGREP_GOARCH": "amd64"
+      }
+    },
+    {
+      "name": "windows-amd64",
+      "displayName": "Cross: windows/amd64",
+      "inherits": "release",
+      "binaryDir": "${sourceDir}/build-windows-amd64",
+      "cacheVariables": {
+        "MARKGREP_GOOS": "windows",
+        "MARKGREP_GOARCH": "amd64"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release"
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug"
+    },
+    {
+      "name": "linux-amd64",
+      "configurePreset": "linux-amd64",
+      "configuration": "Release"
+    },
+    {
+      "name": "windows-amd64",
+      "configurePreset": "windows-amd64",
+      "configuration": "Release"
+    }
+  ],
+  "testPresets": [
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "configuration": "Release",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "debug",
+      "configurePreset": "debug",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

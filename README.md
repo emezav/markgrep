@@ -39,8 +39,61 @@ phrase as you would say it.
 go install github.com/emezav/markgrep@latest
 ```
 
-Or build from source: `go build`. No dependencies beyond the standard library, and
-the result is a single binary.
+Or build from source with `go build`. No dependencies beyond the standard library,
+and the result is a single binary.
+
+### Build and install with CMake
+
+There is no C in this project: CMake is a portable front end over `go build`, so the
+same commands configure, test, install and package on **Windows and Linux alike**.
+
+```console
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+ctest --test-dir build
+cmake --install build --prefix ~/.local
+```
+
+The binary lands in `<prefix>/bin`, the README and LICENSE in
+`<prefix>/share/doc/markgrep`. Omitting `--prefix` uses the system default
+(`/usr/local` on Linux, `C:\Program Files\markgrep` on Windows, which needs an
+elevated shell). `cmake --build build --target uninstall` removes exactly what was
+installed.
+
+**On Windows the default generator is Visual Studio, which is multi-config:** add
+`--config Release` to the build, test, install and package commands. With Ninja or
+Makefiles that flag is unnecessary, since `CMAKE_BUILD_TYPE` already decided.
+
+Presets cover the usual combinations, if you prefer them:
+
+```console
+cmake --preset release && cmake --build --preset release && ctest --preset release
+```
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `MARKGREP_STRIP` | ON, OFF in Debug | Drop symbol and DWARF tables (`-ldflags "-s -w"`) |
+| `MARKGREP_TRIMPATH` | ON | Keep local paths out of the binary (`-trimpath`) |
+| `MARKGREP_BUILD_TESTS` | ON | Register `go vet`, `go test` and the CLI smoke tests |
+| `MARKGREP_INSTALL_DOCS` | ON | Install README.md and LICENSE |
+| `MARKGREP_GOOS` / `MARKGREP_GOARCH` | host | Cross-compilation target |
+| `GO_EXECUTABLE` | found in PATH | Which Go toolchain to use |
+
+Cross-compiling needs no extra toolchain, because `CGO_ENABLED=0` keeps the binary
+pure Go. The `.exe` suffix follows the target, not the host, and the CLI tests are
+skipped when the result cannot run locally:
+
+```console
+cmake -B build-linux -DMARKGREP_GOOS=linux -DMARKGREP_GOARCH=amd64
+cmake --build build-linux
+cpack --config build-linux/CPackConfig.cmake   # -> markgrep-0.1.0-linux-amd64.tar.gz
+```
+
+`cpack` writes a ZIP on Windows and a `.tar.gz` elsewhere, into the build directory,
+containing the same tree `cmake --install` would produce.
+
+The version is read out of `main.go` at configure time, so the binary, the install
+tree and the archive names cannot drift apart.
 
 ## Use
 

@@ -1,0 +1,24 @@
+# Removes what `cmake --install` wrote, reading the manifest it left behind.
+# Configured by CMakeLists.txt into the build directory; run through:
+#
+#   cmake --build build --target uninstall
+
+set(MANIFEST "@CMAKE_CURRENT_BINARY_DIR@/install_manifest.txt")
+
+if(NOT EXISTS "${MANIFEST}")
+    message(FATAL_ERROR "Cannot find ${MANIFEST}: nothing was installed from this build tree.")
+endif()
+
+file(STRINGS "${MANIFEST}" INSTALLED_FILES)
+
+foreach(file IN LISTS INSTALLED_FILES)
+    if(EXISTS "${file}" OR IS_SYMLINK "${file}")
+        message(STATUS "Removing ${file}")
+        file(REMOVE "${file}")
+        if(EXISTS "${file}")
+            message(WARNING "Could not remove ${file}")
+        endif()
+    else()
+        message(STATUS "Already gone: ${file}")
+    endif()
+endforeach()
