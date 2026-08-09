@@ -15,7 +15,7 @@ const version = "0.3.0"
 // unvalidated one -- it refuses a name it does not advertise.
 var usage = strings.Replace(usageTemplate, "{{kinds}}", strings.Join(Kinds, " | "), 1)
 
-const usageTemplate = `markgrep ` + version + ` — grep for markdown prose: searches units, not lines.
+const usageTemplate = `markgrep ` + version + ` -- grep for markdown prose: searches units, not lines.
 
   markgrep search [-e|-f PATTERN]... [--in PATH] [flags]
   markgrep verify --file PATH [--last]

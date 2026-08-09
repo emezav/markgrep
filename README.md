@@ -1,7 +1,7 @@
 # markgrep
 
-**grep for markdown prose.** It searches semantic units — paragraphs, list items,
-sections — instead of lines, and gives you back the whole unit with the heading it
+**grep for markdown prose.** It searches semantic units -- paragraphs, list items,
+sections -- instead of lines, and gives you back the whole unit with the heading it
 lives under.
 
 It emits no verdicts. It tells you what is there and where it lives.
@@ -9,7 +9,7 @@ It emits no verdicts. It tells you what is there and where it lives.
 ## The problem
 
 `grep` works on lines. Prose is hard-wrapped. So a phrase longer than three or four
-words may be split by a newline, and **a correct query returns nothing** — a failure
+words may be split by a newline, and **a correct query returns nothing** -- a failure
 that reads exactly like an absence.
 
 ```console
@@ -25,7 +25,7 @@ NOTES.md:32  [paragraph]  ## Reading strategy
 There is a second failure, subtler, and it is the one that made this tool
 markdown-specific rather than prose-generic:
 
-> **Inline emphasis does not wrap words, it wraps arbitrary spans** — punctuation
+> **Inline emphasis does not wrap words, it wraps arbitrary spans** -- punctuation
 > included. A document may contain `**Rule of thumb:**` with the colon *inside* the
 > asterisks, so whoever writes the query cannot know where the author put them.
 > Hard wrapping is at least predictable. This is not.
@@ -129,7 +129,7 @@ corpus that is what serves; ask for sensitivity with `-s`.
 
 **A name it does not know is refused, not ignored.** `--kind paragrph` exits 2 with the
 list of valid kinds, because filtering everything out and reporting zero is
-indistinguishable from a corpus that genuinely lacks the phrase — which is the exact
+indistinguishable from a corpus that genuinely lacks the phrase -- which is the exact
 failure this tool exists to remove.
 
 **Links resolve to their visible text by default**, so a phrase flows across them:
@@ -141,7 +141,7 @@ notes.md:12  [paragraph]  ## Notes
 ```
 
 Without that, the URL sits between "idea" and "continues" and the query returns
-nothing — the same false absence a hard wrap produces. Ask for the URLs with
+nothing -- the same false absence a hard wrap produces. Ask for the URLs with
 `--links url`, or for both with `--links both`.
 
 ### Flags deliberately not implemented
@@ -160,7 +160,7 @@ markgrep does not implement -C, and it is not an oversight:
 ## grep is the fallback, and every output says so
 
 Each result prints the equivalent `grep` command. If you do not have `markgrep`
-installed you can reproduce the search — worse, but you can. And if you have it, you
+installed you can reproduce the search -- worse, but you can. And if you have it, you
 can drop it without losing anything.
 
 That is deliberate: **a tool you cannot walk away from is a dependency, not a
@@ -172,8 +172,8 @@ convenience.**
 - **No writing.** It does not fix, rewrite or touch your documents.
 - **No index, no cache, no config, no network, no model.**
 
-That last one is a positioning decision, not austerity. The intended caller —
-an agent working through its own corpus — **already has semantic judgment**. What it
+That last one is a positioning decision, not austerity. The intended caller --
+an agent working through its own corpus -- **already has semantic judgment**. What it
 lacks is text arriving in the right units, with its section. Embedding a model here
 would duplicate the one invoking it.
 
@@ -195,7 +195,7 @@ Markdown awareness is the direction of the project, stated plainly rather than
 implied. What has landed:
 
 - **setext headings** (`Title` over `=====` or `-----`). Before this, a document
-  written that way reported `(no section)` for every match — the headline feature
+  written that way reported `(no section)` for every match -- the headline feature
   failing silently on a whole syntax.
 - **links**: match the text, the URL, or both (`--links`), so a phrase crosses a link
   the way it crosses a hard wrap.
@@ -208,7 +208,7 @@ implied. What has landed:
   *cells*, and a cell is rarely a unit of meaning while a row is the record. Cell
   granularity would also break phrases that read across a row.
 - **embedded HTML**: block elements and comments are their own kind, `html`, so hidden
-  markup stops arriving as prose; and inline tags no longer split a phrase —
+  markup stops arriving as prose; and inline tags no longer split a phrase --
   `an <b>important</b> idea` matches `an important idea`, the same way a link does.
   A bare `<` in prose (`a < b`) is left alone.
 - **inline code versus fenced blocks** is settled: inline code lives inside its
@@ -230,7 +230,7 @@ Two invariants hold the `verify` side together, both learned the hard way:
    printed **in the same output**. A "clean" must never be readable without seeing
    that the detector was measuring anything.
 2. **The scope narrows what is reported, never what the detector reads.** Trimming
-   the input looks equivalent and is not — it turns a healthy detector into a dead
+   the input looks equivalent and is not -- it turns a healthy detector into a dead
    one, silently.
 
 ## License
