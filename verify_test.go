@@ -151,7 +151,87 @@ func TestHeaderWithoutRowsIsNotApplicable(t *testing.T) {
 	if ok {
 		t.Fatal("a table header with no rows cannot exercise the column check")
 	}
-	if !strings.Contains(why, "no row to compare") {
+	if !strings.Contains(why, "row to compare") {
+		t.Errorf("the reason should say what is missing, got %q", why)
+	}
+}
+
+// The reference is the row's OWN table, not the first table in the file. Before
+// this, a well-formed second table of a different width had every row reported:
+// 356 findings across 117 documents, of which 354 were this.
+func TestReferenceIsPerTableNotPerFile(t *testing.T) {
+	lines := []string{
+		"| a | b | c |",
+		"| --- | --- | --- |",
+		"| 1 | 2 | 3 |",
+		"",
+		"prose between the two tables",
+		"",
+		"| x | y |",
+		"| --- | --- |",
+		"| 1 | 2 |",
+	}
+	if f := raggedColumns(lines); len(f) != 0 {
+		t.Errorf("two well-formed tables of different widths are not a finding, got %d: %+v", len(f), f)
+	}
+	// The negative control, in the same test so they cannot drift: a genuinely
+	// ragged row inside the SECOND table must still be caught.
+	lines[8] = "| 1 | 2 | 3 |"
+	f := raggedColumns(lines)
+	if len(f) != 1 || f[0].Line != 9 {
+		t.Errorf("a ragged row in the second table must still be found, got %+v", f)
+	}
+}
+
+// A pipe preceded by a backslash is content, not a separator. Two rows of
+// delivered correspondence were accused of being ragged for writing markdown
+// correctly.
+func TestEscapedPipeIsNotASeparator(t *testing.T) {
+	esc := "| `grep -c " + string(rune(92)) + "| wc -l` | ok | yes |"
+	if got, want := cells(esc), 3; got != want {
+		t.Errorf("escaped pipe counted as a separator: got %d cells, want %d", got, want)
+	}
+	if got, want := cells("| a | b | c |"), 3; got != want {
+		t.Errorf("plain row miscounted: got %d, want %d", got, want)
+	}
+	lines := []string{"| a | b | c |", "| --- | --- | --- |", esc}
+	if f := raggedColumns(lines); len(f) != 0 {
+		t.Errorf("a correctly escaped row is not ragged, got %+v", f)
+	}
+}
+
+// These documents are full of fenced blocks whose lines begin with a pipe. They
+// are code, not table rows, and the detector had no idea fences existed.
+func TestFencedBlockIsNotATable(t *testing.T) {
+	lines := []string{
+		"| a | b |",
+		"| --- | --- |",
+		"| 1 | 2 |",
+		"",
+		"```text",
+		"| this is a drawing, not a row",
+		"| and it has a different number of pipes | see |",
+		"```",
+	}
+	if f := raggedColumns(lines); len(f) != 0 {
+		t.Errorf("lines inside a fence are not table rows, got %+v", f)
+	}
+	// And the applicability answer must use the same notion of a table.
+	if ok, _ := hasComparableTable([]string{"```", "| not | a | table |", "| x |", "```"}); ok {
+		t.Error("a fenced block must not make the column check applicable")
+	}
+}
+
+// Two single-row tables are not comparable, however many rows the file has in
+// total. The old applicability counted rows across the whole document and said
+// yes to inputs the check could do nothing with.
+func TestTwoSingleRowTablesAreNotComparable(t *testing.T) {
+	lines := []string{"| a | b |", "", "prose", "", "| c | d |"}
+	ok, why := hasComparableTable(lines)
+	if ok {
+		t.Error("two one-row tables give the check nothing to compare")
+	}
+	if !strings.Contains(why, "row to compare") {
 		t.Errorf("the reason should say what is missing, got %q", why)
 	}
 }

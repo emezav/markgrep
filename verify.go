@@ -52,26 +52,83 @@ func nonASCII(lines []string) []Finding {
 	return out
 }
 
-func raggedColumns(lines []string) []Finding {
-	cells := func(l string) int { return strings.Count(l, "|") - 1 }
-	ref, refLine := -1, 0
-	var out []Finding
+// cells counts the separators of a table row.
+//
+// A pipe preceded by a backslash is ESCAPED: markdown reads it as content
+// inside a cell, not as a boundary between two. Counting it cost two false
+// findings against correctly written rows, both in delivered correspondence.
+func cells(l string) int {
+	n := 0
+	for i := 0; i < len(l); i++ {
+		if l[i] == '|' && (i == 0 || l[i-1] != '\\') {
+			n++
+		}
+	}
+	return n - 1
+}
+
+// tableRow is a content-carrying row, with which table of the document it
+// belongs to.
+type tableRow struct {
+	Line  int // 1-based
+	Cells int
+	Table int // 0-based index of the table within the document
+}
+
+// tableRows walks a document and returns its table rows, grouped by table.
+//
+// One walker for the check AND for its applicability, because they answer the
+// same question about the same shape and answering it twice is how the two
+// drift apart. A table ends at the first line that is not one of its rows, and
+// a line inside a fenced block is not a row at all -- these documents are full
+// of code blocks whose content begins with a pipe.
+func tableRows(lines []string) []tableRow {
+	var out []tableRow
+	table, inTable, inFence := -1, false, false
 	for i, l := range lines {
+		if isFence(l) {
+			inFence = !inFence
+			inTable = false
+			continue
+		}
+		if inFence {
+			continue
+		}
 		t := strings.TrimSpace(l)
 		if !strings.HasPrefix(t, "|") {
+			inTable = false
 			continue
 		}
 		if strings.Contains(t, "---") {
-			continue // separator row
+			continue // separator row: part of the table, carries no content
 		}
-		n := cells(t)
-		if ref == -1 {
-			ref, refLine = n, i+1
+		if !inTable {
+			table++
+			inTable = true
+		}
+		out = append(out, tableRow{i + 1, cells(t), table})
+	}
+	return out
+}
+
+// raggedColumns reports rows whose cell count differs from their OWN table's
+// header.
+//
+// It used to compare against the first table row in the whole FILE, so a
+// well-formed second table of a different width had every row reported. Measured
+// on 2026-08-09 over 117 documents: 356 findings before, 2 after, and both
+// survivors are real.
+func raggedColumns(lines []string) []Finding {
+	var out []Finding
+	cur, ref, refLine := -1, 0, 0
+	for _, r := range tableRows(lines) {
+		if r.Table != cur {
+			cur, ref, refLine = r.Table, r.Cells, r.Line
 			continue
 		}
-		if n != ref {
-			out = append(out, Finding{i + 1,
-				fmt.Sprintf("%d columns; the header (line %d) has %d", n, refLine, ref)})
+		if r.Cells != ref {
+			out = append(out, Finding{r.Line,
+				fmt.Sprintf("%d columns; the header (line %d) has %d", r.Cells, refLine, ref)})
 		}
 	}
 	return out
@@ -87,25 +144,29 @@ func hasContent(lines []string) (bool, string) {
 	return false, "the input has no content"
 }
 
-// hasComparableTable reports whether raggedColumns has a header AND at least
-// one row to compare against it. With a single row there is nothing to differ
-// from, so the check returns zero for a reason that has nothing to do with the
-// document being well formed.
+// hasComparableTable reports whether SOME table in the input has a header AND
+// at least one row to compare against it.
+//
+// It walks the same `tableRows` the check does, which is the point: counting
+// rows across the whole file said yes for a document with two single-row
+// tables, where the check can compare nothing. An applicability answer that
+// does not use the check's own notion of a table is a guard for a different
+// function.
 func hasComparableTable(lines []string) (bool, string) {
-	rows := 0
-	for _, l := range lines {
-		t := strings.TrimSpace(l)
-		if strings.HasPrefix(t, "|") && !strings.Contains(t, "---") {
-			rows++
+	rows := tableRows(lines)
+	if len(rows) == 0 {
+		return false, "the input has no table"
+	}
+	perTable := map[int]int{}
+	for _, r := range rows {
+		perTable[r.Table]++
+	}
+	for _, n := range perTable {
+		if n >= 2 {
+			return true, ""
 		}
 	}
-	switch rows {
-	case 0:
-		return false, "the input has no table"
-	case 1:
-		return false, "the input has a table header and no row to compare against it"
-	}
-	return true, ""
+	return false, "no table in the input has a row to compare against its header"
 }
 
 func Detectors() []Detector {
