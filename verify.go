@@ -186,8 +186,38 @@ func Detectors() []Detector {
 			Name:  "columns",
 			Desc:  "every table row has its header's column count",
 			Check: raggedColumns,
+			// The control carries ONE INSTANCE OF EVERY DISTINCTION THE CHECK
+			// MAKES, which is what a single ragged table could never do.
+			//
+			// stele derived the narrow form of this from our own failure: a
+			// control of one instance cannot validate a detector that compares
+			// against a reference, because with one table both references
+			// coincide by construction. That is why five versions of a detector
+			// with under one percent signal printed MEASURES every time -- a
+			// control does not fall short noisily, it certifies.
+			//
+			// Generalised here: the input has two tables of different widths (so
+			// taking the reference from the file goes BROKEN), an escaped pipe
+			// that is content (so counting it goes BROKEN), and a fenced block
+			// whose lines start with a pipe (so reading them as rows goes
+			// BROKEN). Exactly one row is really ragged.
 			Control: func() ([]string, int) {
-				return []string{"| a | b | c |", "| --- | --- | --- |", "| 1 | 2 | 3 | 4 |"}, 1
+				return []string{
+					"| a | b |",
+					"| --- | --- |",
+					"| 1 | 2 |",
+					"",
+					"| c | d | e |",
+					"| --- | --- | --- |",
+					"| 1 | 2 | 3 |",
+					`| x \| y | z | w |`,
+					"| 4 | 5 |",
+					"",
+					"```text",
+					"| a drawing | not | a table |",
+					"| shorter |",
+					"```",
+				}, 1
 			},
 			Applicable: hasComparableTable,
 		},
