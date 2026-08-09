@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
 )
@@ -217,5 +218,29 @@ func TestUsageAdvertisesEveryValidKind(t *testing.T) {
 	}
 	if strings.Contains(usage, "{{kinds}}") {
 		t.Error("the usage template was not resolved")
+	}
+}
+
+// The README is the product's front page, so the kind list stays visible there
+// rather than being replaced by a pointer. That leaves the list with two homes
+// -- Kinds and the README -- which is the defect stele found in bc36115, where
+// main.go generated its help and README.md still enumerated by hand.
+//
+// This does not eliminate the second home; it makes drift impossible to ship.
+// Eliminating would mean generating the README at build time, and this project
+// has no build step beyond `go build`.
+func TestReadmeAdvertisesEveryValidKind(t *testing.T) {
+	b, err := os.ReadFile("README.md")
+	if err != nil {
+		t.Fatalf("cannot read README.md, so this test proves nothing: %v", err)
+	}
+	readme := string(b)
+	for _, k := range Kinds {
+		if !strings.Contains(readme, "`"+k+"`") {
+			t.Errorf("README.md does not list the valid kind %q", k)
+		}
+	}
+	if !strings.Contains(readme, "`any`") {
+		t.Error("README.md does not list `any`")
 	}
 }
