@@ -23,6 +23,16 @@ type Detector struct {
 	Check func(lines []string) []Finding
 	// Control returns a test input and how many findings it MUST produce.
 	Control func() (input []string, expected int)
+	// Applicable reports whether THIS input can exercise Check at all, and says
+	// why not when it cannot.
+	//
+	// Control proves the check discriminates; it runs against its own synthetic
+	// input and therefore says nothing about what arrived. Without Applicable a
+	// detector that could not possibly have fired still prints "0 findings", and
+	// that zero is indistinguishable from a clean corpus -- the false absence
+	// this tool exists to remove, occurring inside the subcommand written to
+	// prevent it. Measured on an empty file, 2026-08-09, after stele asked.
+	Applicable func(lines []string) (ok bool, why string)
 }
 
 func nonASCII(lines []string) []Finding {
@@ -67,6 +77,37 @@ func raggedColumns(lines []string) []Finding {
 	return out
 }
 
+// hasContent reports whether there is any character for nonASCII to look at.
+func hasContent(lines []string) (bool, string) {
+	for _, l := range lines {
+		if l != "" {
+			return true, ""
+		}
+	}
+	return false, "the input has no content"
+}
+
+// hasComparableTable reports whether raggedColumns has a header AND at least
+// one row to compare against it. With a single row there is nothing to differ
+// from, so the check returns zero for a reason that has nothing to do with the
+// document being well formed.
+func hasComparableTable(lines []string) (bool, string) {
+	rows := 0
+	for _, l := range lines {
+		t := strings.TrimSpace(l)
+		if strings.HasPrefix(t, "|") && !strings.Contains(t, "---") {
+			rows++
+		}
+	}
+	switch rows {
+	case 0:
+		return false, "the input has no table"
+	case 1:
+		return false, "the input has a table header and no row to compare against it"
+	}
+	return true, ""
+}
+
 func Detectors() []Detector {
 	return []Detector{
 		{
@@ -78,6 +119,7 @@ func Detectors() []Detector {
 				// it claims to look at.
 				return []string{"a line with an n-tilde: año"}, 1
 			},
+			Applicable: hasContent,
 		},
 		{
 			Name:  "columns",
@@ -86,6 +128,7 @@ func Detectors() []Detector {
 			Control: func() ([]string, int) {
 				return []string{"| a | b | c |", "| --- | --- | --- |", "| 1 | 2 | 3 | 4 |"}, 1
 			},
+			Applicable: hasComparableTable,
 		},
 	}
 }
@@ -96,6 +139,13 @@ func Detectors() []Detector {
 //
 // Returns (findings, brokenDetectors).
 func Verify(w io.Writer, path string, lines []string, lastOnly bool) (int, int) {
+	return verifyWith(w, path, lines, lastOnly, Detectors())
+}
+
+// verifyWith is Verify over an explicit detector list, so the suite can hand it
+// a deliberately broken detector and watch it be refused. A guard that cannot be
+// proven red is decoration, which is the defect this file exists to prevent.
+func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []Detector) (int, int) {
 	// The focus narrows what is REPORTED, not what the detector READS.
 	//
 	// Trimming the input looked equivalent and is not: the column detector needs
@@ -121,22 +171,51 @@ func Verify(w io.Writer, path string, lines []string, lastOnly bool) (int, int) 
 		return out
 	}
 
-	total, broken := 0, 0
+	total, broken, skipped := 0, 0, 0
 	fmt.Fprintf(w, "scope: %s\n", scope)
 
-	for _, d := range Detectors() {
+	for _, d := range ds {
 		input, expected := d.Control()
 		got := len(d.Check(input))
-		state := "MEASURES"
-		if got != expected {
-			state = "BROKEN"
+
+		// Three ways to be BROKEN, and the first two are about the detector's
+		// ability to look rather than its result. A detector that cannot say
+		// whether it could measure is in the same position as one that cannot
+		// prove it measures, and a control run on an input the detector would
+		// refuse proves nothing at all.
+		state, why := "MEASURES", ""
+		switch {
+		case d.Applicable == nil:
+			state, why = "BROKEN", "no applicability check"
+		case got != expected:
+			state, why = "BROKEN", "the control did not produce what it must"
+		default:
+			if ok, _ := d.Applicable(input); !ok {
+				state, why = "BROKEN", "the control input is one this detector would refuse"
+			}
+		}
+		if state == "BROKEN" {
 			broken++
 		}
+
 		fmt.Fprintf(w, "\ndetector %-9s %s\n", d.Name, d.Desc)
-		fmt.Fprintf(w, "  positive control: expected %d, got %d  -> %s\n", expected, got, state)
+		fmt.Fprintf(w, "  positive control: expected %d, got %d  -> %s", expected, got, state)
+		if why != "" {
+			fmt.Fprintf(w, " (%s)", why)
+		}
+		fmt.Fprintln(w)
 
 		if state == "BROKEN" {
 			fmt.Fprintf(w, "  result: NOT REPORTED. A detector that does not measure cannot say 'clean'.\n")
+			continue
+		}
+
+		// Scope again, one level in from --last: the check is healthy and the
+		// input still cannot exercise it. Reporting "0 findings" here would be a
+		// zero about the corpus when it is a zero about the question.
+		if ok, reason := d.Applicable(lines); !ok {
+			skipped++
+			fmt.Fprintf(w, "  result: NOT APPLICABLE -- %s\n", reason)
 			continue
 		}
 		f := filter(d.Check(lines))
@@ -153,6 +232,9 @@ func Verify(w io.Writer, path string, lines []string, lastOnly bool) (int, int) 
 	fmt.Fprintf(w, "\n--- grep equivalent (no positive control: a broken zero reads the same) ---\n")
 	fmt.Fprintf(w, "  LC_ALL=C grep -n '[^ -~]' %s\n", path)
 	fmt.Fprintf(w, "  awk -F'|' '{print NF-2}' %s\n", path)
-	fmt.Fprintf(w, "\nfindings: %d   broken detectors: %d\n", total, broken)
+	fmt.Fprintf(w, "\nfindings: %d   broken detectors: %d   not applicable: %d\n", total, broken, skipped)
+	if skipped > 0 && total == 0 && broken == 0 {
+		fmt.Fprintf(w, "note: %d detector(s) could not be exercised by this input, so this is not a clean bill.\n", skipped)
+	}
 	return total, broken
 }

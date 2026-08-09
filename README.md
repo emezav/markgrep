@@ -248,14 +248,20 @@ What is still open:
 
 ## Design notes
 
-Two invariants hold the `verify` side together, both learned the hard way:
+These invariants hold the `verify` side together, every one of them learned the
+hard way:
 
-1. **Every detector carries its positive control**, and result and control are
-   printed **in the same output**. A "clean" must never be readable without seeing
-   that the detector was measuring anything.
-2. **The scope narrows what is reported, never what the detector reads.** Trimming
-   the input looks equivalent and is not -- it turns a healthy detector into a dead
-   one, silently.
+- **Every detector carries its positive control**, and result and control are
+  printed **in the same output**. A "clean" must never be readable without seeing
+  that the detector was measuring anything.
+- **The scope narrows what is reported, never what the detector reads.** Trimming
+  the input looks equivalent and is not -- it turns a healthy detector into a dead
+  one, silently.
+- **Every detector also says whether the input could have exercised it at all.**
+  A control proves the question is well posed; it cannot prove the corpus could
+  answer it. So an input with no table reports `NOT APPLICABLE -- the input has no
+  table` rather than `0 findings`, because a zero about the question reads exactly
+  like a zero about the document.
 
 ## License
 
