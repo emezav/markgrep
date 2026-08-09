@@ -222,6 +222,33 @@ if(MARKGREP_BUILD_TESTS)
                          --in "${MARKGREP_CORPUS}")
         set_tests_properties(cli_search_miss PROPERTIES WILL_FAIL TRUE)
 
+        # An input no detector can measure exits 2, not 0. Zero findings out of
+        # zero detectors is not the same answer as zero findings out of two, and
+        # a caller that scripts on the exit code used to be told "clean".
+        # The empty file is generated here so the test carries its own fixture.
+        set(MARKGREP_EMPTY "${CMAKE_CURRENT_BINARY_DIR}/nothing-to-measure.md")
+        file(WRITE "${MARKGREP_EMPTY}" "")
+        # Two tests, not one: ctest ignores the exit code as soon as
+        # PASS_REGULAR_EXPRESSION is set, so pinning the code and pinning the
+        # message have to be separate or one of them silently stops being checked.
+        add_test(NAME cli_verify_nothing_measurable
+                 COMMAND "${MARKGREP_BINARY}" verify --file "${MARKGREP_EMPTY}")
+        set_tests_properties(cli_verify_nothing_measurable PROPERTIES WILL_FAIL TRUE)
+
+        add_test(NAME cli_verify_nothing_measurable_says_why
+                 COMMAND "${MARKGREP_BINARY}" verify --file "${MARKGREP_EMPTY}")
+        set_tests_properties(cli_verify_nothing_measurable_says_why PROPERTIES
+            PASS_REGULAR_EXPRESSION "cannot say clean")
+
+        # The negative control for the test above, and it is what makes it mean
+        # anything: a file that CAN be measured and is clean still exits 0.
+        set(MARKGREP_MEASURABLE "${CMAKE_CURRENT_BINARY_DIR}/measurable-clean.md")
+        file(WRITE "${MARKGREP_MEASURABLE}" "# A heading\n\nPlain ascii prose with no table.\n")
+        add_test(NAME cli_verify_measurable_clean
+                 COMMAND "${MARKGREP_BINARY}" verify --file "${MARKGREP_MEASURABLE}")
+        set_tests_properties(cli_verify_measurable_clean PROPERTIES
+            PASS_REGULAR_EXPRESSION "result: 0 findings")
+
         # Line-model flags are rejected with an explanation, not accepted.
         add_test(NAME cli_rejects_line_flags
                  COMMAND "${MARKGREP_BINARY}" search -C 3 -e "anything"

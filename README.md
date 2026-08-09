@@ -262,6 +262,10 @@ hard way:
   answer it. So an input with no table reports `NOT APPLICABLE -- the input has no
   table` rather than `0 findings`, because a zero about the question reads exactly
   like a zero about the document.
+- **And the exit code says it too.** If *nothing* could measure the input,
+  `verify` exits 2, not 0. Otherwise a caller scripting on the exit code is told a
+  corpus that could not contain a finding is clean -- which is the same false
+  absence, one layer down where no one is reading the output.
 
 ## License
 

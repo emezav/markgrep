@@ -137,15 +137,21 @@ func Detectors() []Detector {
 // its positive control next to its result. A "clean" must never be readable
 // without seeing, right beside it, that the detector was measuring something.
 //
-// Returns (findings, brokenDetectors).
-func Verify(w io.Writer, path string, lines []string, lastOnly bool) (int, int) {
+// Returns (findings, brokenDetectors, measured), where measured counts the
+// detectors that actually ran against THIS input.
+//
+// The caller needs the third number to tell two zeros apart. Zero findings out
+// of two detectors that measured is a clean corpus; zero findings out of zero
+// detectors that measured is no information at all, and reporting both as
+// success is the false absence this tool exists to remove.
+func Verify(w io.Writer, path string, lines []string, lastOnly bool) (int, int, int) {
 	return verifyWith(w, path, lines, lastOnly, Detectors())
 }
 
 // verifyWith is Verify over an explicit detector list, so the suite can hand it
 // a deliberately broken detector and watch it be refused. A guard that cannot be
 // proven red is decoration, which is the defect this file exists to prevent.
-func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []Detector) (int, int) {
+func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []Detector) (int, int, int) {
 	// The focus narrows what is REPORTED, not what the detector READS.
 	//
 	// Trimming the input looked equivalent and is not: the column detector needs
@@ -171,7 +177,7 @@ func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []De
 		return out
 	}
 
-	total, broken, skipped := 0, 0, 0
+	total, broken, skipped, measured := 0, 0, 0, 0
 	fmt.Fprintf(w, "scope: %s\n", scope)
 
 	for _, d := range ds {
@@ -218,6 +224,7 @@ func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []De
 			fmt.Fprintf(w, "  result: NOT APPLICABLE -- %s\n", reason)
 			continue
 		}
+		measured++
 		f := filter(d.Check(lines))
 		total += len(f)
 		if len(f) == 0 {
@@ -232,9 +239,16 @@ func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []De
 	fmt.Fprintf(w, "\n--- grep equivalent (no positive control: a broken zero reads the same) ---\n")
 	fmt.Fprintf(w, "  LC_ALL=C grep -n '[^ -~]' %s\n", path)
 	fmt.Fprintf(w, "  awk -F'|' '{print NF-2}' %s\n", path)
-	fmt.Fprintf(w, "\nfindings: %d   broken detectors: %d   not applicable: %d\n", total, broken, skipped)
-	if skipped > 0 && total == 0 && broken == 0 {
-		fmt.Fprintf(w, "note: %d detector(s) could not be exercised by this input, so this is not a clean bill.\n", skipped)
+	fmt.Fprintf(w, "\nfindings: %d   broken detectors: %d   not applicable: %d   measured: %d\n",
+		total, broken, skipped, measured)
+
+	// The tail carries the consequence, not just the count. A person reading
+	// "0 findings" beside "measured: 0" should not have to work out what it
+	// means for the exit code.
+	if measured == 0 {
+		fmt.Fprintf(w, "note: nothing could measure this input, so this run cannot say clean (exit 2).\n")
+	} else if skipped > 0 && total == 0 {
+		fmt.Fprintf(w, "note: %d detector(s) could not be exercised, so this zero covers less than the whole check.\n", skipped)
 	}
-	return total, broken
+	return total, broken, measured
 }

@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const version = "0.4.0"
+const version = "0.5.0"
 
 // usage is built rather than written, because the list of kinds had two homes
 // and they drifted: adding `html` updated Kinds and left the help text stale.
@@ -49,7 +49,8 @@ WHAT IS NOT IMPLEMENTED, and why: -A, -B, -C and -o belong to the LINE model.
 Here the context IS the unit and the result IS the unit, so those flags have no
 translation. They are rejected with an explanation instead of half-implemented.
 
-Exit codes:  0 = matches   1 = no matches   2 = error or BROKEN detector
+Exit codes:  0 = matches   1 = no matches
+             2 = error, BROKEN detector, or nothing could measure the input
 
 It emits no verdicts: it says what is there and where it lives. The fallback is
 always grep, and every output prints the equivalent command.
@@ -276,9 +277,14 @@ func cmdVerify(args []string) {
 		lines = lines[:n-1]
 	}
 
-	findings, broken := Verify(os.Stdout, path, lines, last)
+	findings, broken, measured := Verify(os.Stdout, path, lines, last)
 	switch {
-	case broken > 0:
+	// Two zeros that read alike from the outside: nothing wrong, and nothing
+	// looked at. A caller scripting on the exit code was told "clean" for a
+	// corpus that could not have contained a finding, which is the false
+	// absence this tool exists to remove. Both mean "you did not get an
+	// answer", so both are 2.
+	case broken > 0 || measured == 0:
 		os.Exit(2)
 	case findings > 0:
 		os.Exit(1)
