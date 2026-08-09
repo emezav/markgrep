@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -229,18 +230,62 @@ func TestUsageAdvertisesEveryValidKind(t *testing.T) {
 // This does not eliminate the second home; it makes drift impossible to ship.
 // Eliminating would mean generating the README at build time, and this project
 // has no build step beyond `go build`.
-func TestReadmeAdvertisesEveryValidKind(t *testing.T) {
+//
+// The comparison runs BOTH ways. A guard that only walks Kinds sees what is
+// missing and never what is surplus: drop a kind from Kinds, leave it in the
+// README, and a one-way test stays green while the README advertises a name the
+// tool now refuses. stele asked the question that found that hole.
+func TestReadmeKindListMatchesKindsExactly(t *testing.T) {
+	names := readmeKinds(t)
+
+	want := map[string]bool{"any": true}
+	for _, k := range Kinds {
+		want[k] = true
+	}
+	got := map[string]bool{}
+	for _, n := range names {
+		got[n] = true
+	}
+
+	for k := range want {
+		if !got[k] {
+			t.Errorf("README.md does not list %q", k)
+		}
+	}
+	for n := range got {
+		if !want[n] {
+			t.Errorf("README.md lists %q, which is not a valid kind -- the tool would refuse it", n)
+		}
+	}
+}
+
+// readmeKinds returns the names enumerated in the README's --kind row.
+//
+// It fails rather than returning nothing when it cannot find the list. A
+// locator that silently finds no list turns the guard above into decoration,
+// which is the same class of defect the guard exists to catch.
+func readmeKinds(t *testing.T) []string {
+	t.Helper()
 	b, err := os.ReadFile("README.md")
 	if err != nil {
 		t.Fatalf("cannot read README.md, so this test proves nothing: %v", err)
 	}
-	readme := string(b)
-	for _, k := range Kinds {
-		if !strings.Contains(readme, "`"+k+"`") {
-			t.Errorf("README.md does not list the valid kind %q", k)
+	const marker = "unit kinds:"
+	for _, line := range strings.Split(string(b), "\n") {
+		i := strings.Index(line, marker)
+		if i < 0 {
+			continue
 		}
+		names := regexp.MustCompile("`([a-z]+)`").FindAllStringSubmatch(line[i+len(marker):], -1)
+		if len(names) == 0 {
+			t.Fatalf("found the %q row but no backticked names in it: %s", marker, line)
+		}
+		out := make([]string, len(names))
+		for j, m := range names {
+			out[j] = m[1]
+		}
+		return out
 	}
-	if !strings.Contains(readme, "`any`") {
-		t.Error("README.md does not list `any`")
-	}
+	t.Fatalf("README.md has no line containing %q; the guard cannot locate the kind list", marker)
+	return nil
 }
