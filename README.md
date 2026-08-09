@@ -42,6 +42,20 @@ go install github.com/emezav/markgrep@latest
 Or build from source with `go build`. No dependencies beyond the standard library,
 and the result is a single binary.
 
+### Update an existing install
+
+Run the same command again. `go install` overwrites the binary in `$(go env GOPATH)/bin`,
+and with CMake you rebuild and `cmake --install` over the same `--prefix`.
+
+**Do not use `markgrep version` to decide whether you need to.** It prints the version
+compiled into the source, so any fix that does not raise that number leaves the string
+identical before and after -- which is exactly what happened to the release that made
+this help text ASCII. Reinstalling costs a second; asking the binary its version cannot
+tell you the two builds apart.
+
+There are no release tags, so `@latest` resolves to the newest commit on `main` as a
+pseudo-version.
+
 ### Build and install with CMake
 
 There is no C in this project: CMake is a portable front end over `go build`, so the
