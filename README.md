@@ -50,8 +50,18 @@ and with CMake you rebuild and `cmake --install` over the same `--prefix`.
 **Do not use `markgrep version` to decide whether you need to.** It prints the version
 compiled into the source, so any fix that does not raise that number leaves the string
 identical before and after -- which is exactly what happened to the release that made
-this help text ASCII. Reinstalling costs a second; asking the binary its version cannot
-tell you the two builds apart.
+this help text ASCII. A version string is a claim about the source, not a fingerprint
+of the binary.
+
+The fingerprint is there, though, because `go install` stamps it in:
+
+```console
+go version -m $(command -v markgrep) | grep vcs.
+```
+
+That prints the exact `vcs.revision` your binary was built from, its `vcs.time`, and
+`vcs.modified` if it came from a dirty tree. Compare it against `git rev-parse HEAD`,
+or against the repository, and you have an answer instead of an inference.
 
 There are no release tags, so `@latest` resolves to the newest commit on `main` as a
 pseudo-version.
