@@ -201,3 +201,21 @@ func TestCheckLinksRejectsATypo(t *testing.T) {
 		}
 	}
 }
+
+// The help text and the validator must not drift: a validated flag whose help
+// lists the wrong names refuses something it never advertised. This caught the
+// real cost of validating --kind -- the list had two homes and adding `html`
+// updated only one.
+func TestUsageAdvertisesEveryValidKind(t *testing.T) {
+	for _, k := range Kinds {
+		if !strings.Contains(usage, k) {
+			t.Errorf("usage text does not mention the valid kind %q", k)
+		}
+	}
+	if !strings.Contains(usage, "| any") {
+		t.Error("usage text does not mention `any`")
+	}
+	if strings.Contains(usage, "{{kinds}}") {
+		t.Error("the usage template was not resolved")
+	}
+}

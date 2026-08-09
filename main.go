@@ -9,7 +9,13 @@ import (
 
 const version = "0.3.0"
 
-const usage = `markgrep ` + version + ` — grep for markdown prose: searches units, not lines.
+// usage is built rather than written, because the list of kinds had two homes
+// and they drifted: adding `html` updated Kinds and left the help text stale.
+// A validated flag whose help text lists the wrong names is worse than an
+// unvalidated one -- it refuses a name it does not advertise.
+var usage = strings.Replace(usageTemplate, "{{kinds}}", strings.Join(Kinds, " | "), 1)
+
+const usageTemplate = `markgrep ` + version + ` — grep for markdown prose: searches units, not lines.
 
   markgrep search [-e|-f PATTERN]... [--in PATH] [flags]
   markgrep verify --file PATH [--last]
@@ -30,7 +36,7 @@ read "unit"):
 
 Own:
   --in PATH        file or directory (default: .)
-  --kind KIND[,..] paragraph | item | code | table | heading | quote | frontmatter | html | any
+  --kind KIND[,..] {{kinds}} | any
                    one unit per table ROW; unknown names are refused, not ignored
   --links MODE     text (default) | url | both -- what a [text](url) contributes
   --raw            print the unit with its line breaks; flattened by default
