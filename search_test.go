@@ -94,20 +94,64 @@ func TestCompileRejectsABadPattern(t *testing.T) {
 	}
 }
 
-// The invariant: every output prints the command that reproduces the search
-// without this tool.
-func TestPrintMatchesAlwaysEmitsTheGrepEquivalent(t *testing.T) {
-	var buf bytes.Buffer
+// The equivalent must be RUNNABLE and must mean the same search, which is more
+// than "a grep line appears". Both halves were false for fourteen versions and an
+// audit found neither -- the test below named the invariant and only ever
+// exercised the default path.
+//
+// -iF aborts with SIGABRT in a single-byte locale on at least one grep build,
+// regardless of pattern or input, so a literal search printed a command that
+// could not run. And a Go regexp handed to grep without -E is read as BRE, where
+// alternation is literal: markgrep matched three units for `unit|line` and the
+// command it printed matched one. ERE for both, with the literal escaped.
+func TestPrintMatchesEmitsARunnableEquivalentThatMeansTheSameSearch(t *testing.T) {
 	units := parse("something findable\n")
-	ms := mustSearch(t, units, []string{"findable"}, Options{})
 
-	PrintMatches(&buf, ms, []string{"findable"}, ".", false, Options{})
-	out := buf.String()
-	if !strings.Contains(out, "grep equivalent") {
-		t.Error("output is missing the grep equivalent block")
+	for _, c := range []struct {
+		name string
+		pat  string
+		o    Options
+		want string
+		root string
+	}{
+		{"literal", "findable", Options{Literal: true}, `grep -rniE 'findable' '.'`, "."},
+		{"literal with metacharacters", "a.b*c", Options{Literal: true}, `grep -rniE 'a\.b\*c' '.'`, "."},
+		{"regex keeps the pattern but declares ERE", "unit|line", Options{}, `grep -rniE 'unit|line' '.'`, "."},
+		{"case sensitive drops the i", "findable", Options{CaseSens: true, Literal: true}, `grep -rnE 'findable' '.'`, "."},
+		{"a root with a space is quoted too", "findable", Options{Literal: true}, `grep -rniE 'findable' 'with space'`, "with space"},
+		{"a quote in the pattern survives", "it's", Options{Literal: true}, `grep -rniE 'it'\''s' '.'`, "."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			ms := mustSearch(t, units, []string{"findable"}, Options{})
+			PrintMatches(&buf, ms, []string{c.pat}, c.root, false, c.o)
+			if !strings.Contains(buf.String(), c.want) {
+				t.Errorf("want the emitted command to contain\n  %s\ngot\n%s", c.want, buf.String())
+			}
+		})
 	}
-	if !strings.Contains(out, `grep -rni "findable" .`) {
-		t.Errorf("grep equivalent does not carry the translated flags:\n%s", out)
+}
+
+// -c and -l deliberately do NOT emit it: they are machine-readable output and a
+// caller may be piping them. DECIDED 2026-08-10, when an audit found the
+// invariant had been false for these two paths since the first commit and
+// nothing had ever declared this. Pinned so the decision cannot drift back into
+// being an accident.
+func TestPrintMatchesKeepsMachineReadableOutputClean(t *testing.T) {
+	units := append(Parse("a.md", "hit one\n"), Parse("b.md", "hit two\n")...)
+	ms := mustSearch(t, units, []string{"hit"}, Options{})
+
+	for _, c := range []struct {
+		name string
+		o    Options
+	}{{"-c", Options{Count: true}}, {"-l", Options{FilesOnly: true}}} {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			PrintMatches(&buf, ms, []string{"hit"}, ".", false, c.o)
+			if strings.Contains(buf.String(), "grep equivalent") {
+				t.Errorf("%s must stay clean for a caller piping it, got\n%s", c.name, buf.String())
+			}
+		})
 	}
 }
 

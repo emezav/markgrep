@@ -190,6 +190,21 @@ can drop it without losing anything.
 That is deliberate: **a tool you cannot walk away from is a dependency, not a
 convenience.**
 
+The command is meant to be pasted, so it is emitted as **ERE** with the pattern and
+the path quoted for a shell, and a literal (`-F`) is escaped into ERE rather than
+declared with `-F`. Two reasons, both found by going to run it:
+
+- `grep -i` together with `-F` **aborts** in a single-byte locale (`C`, `POSIX`, or
+  none set) on at least one GNU grep 3.0 build -- whatever the pattern, whatever the
+  input, even from standard input. Under a UTF-8 locale it works.
+- A regular expression handed to `grep` with no dialect flag is read as **BRE**, where
+  alternation is a literal character. For `unit|line` markgrep matched three units and
+  the command it printed matched one -- not a weaker reproduction, a different question.
+
+**`-c` and `-l` do not print it**, and that is a decision rather than an oversight:
+they exist to be piped, and a caller counting lines should get lines. Run the search
+without them to get the command.
+
 ## What it will not do
 
 - **No verdicts.** It never says "this is orphaned" or "this is clean".

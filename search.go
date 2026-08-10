@@ -8,6 +8,16 @@ import (
 	"strings"
 )
 
+// shellQuote wraps a pattern so it survives a shell verbatim. It exists because
+// %q is GO quoting, not shell quoting: it doubles a backslash, so the escaped
+// literal `a\.b` was printed as "a\\.b" and pasting it searched for something
+// else. Single quotes make every byte literal, which is what a pattern needs,
+// and an embedded single quote is closed, escaped and reopened -- the one form
+// POSIX sh gives no shorthand for.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
 // Match is a unit where at least one of the phrasings hit.
 type Match struct {
 	U        Unit
@@ -172,30 +182,47 @@ func PrintMatches(w io.Writer, ms []Match, patterns []string, root string, raw b
 
 	// Invariant: the fallback is not theoretical. Whoever lacks this tool can
 	// reproduce the search worse but reproduce it -- and whoever has it can drop
-	// it without losing anything.
+	// it without losing anything. "Reproduce" has two halves and both were false
+	// for fourteen versions, which is why the flags below look the way they do.
 	//
-	// KNOWN EXCEPTION, and it lives here because this is where the invariant is
-	// stated. Search is case-insensitive by default, so under -F the command
-	// below carries -iF. On at least one platform -- GNU grep 3.0 over the MSYS2
-	// runtime, which is where this project is developed -- `grep -iF` aborts with
-	// SIGABRT (exit 134) and empty output, on any file. There the printed command
-	// reproduces nothing and this invariant is false. It is not worked around,
-	// because the command is correct GNU grep and every frame of the stackdump is
-	// in the MSYS2 runtime, so the defect is a layer below. Whoever hits it: check
-	// the exit code, and use -i without -F over an escaped pattern.
+	// RUNNABLE. `-i` together with `-F` aborts with SIGABRT in a single-byte
+	// locale (C, POSIX, or none set) on at least one GNU grep 3.0 build. It is
+	// not the data: a pure-ASCII file, an ASCII pattern, an empty pattern and
+	// stdin all abort alike, and the same call under any UTF-8 locale works. So a
+	// literal search used to print a command that could not run at all wherever
+	// the caller had no locale set -- which is every cron job and every minimal
+	// container.
+	//
+	// THE SAME SEARCH. A Go regexp handed to grep with no dialect flag is read as
+	// BRE, where alternation is a literal character: for `unit|line` markgrep
+	// matched three units and the command it printed matched one. That is not a
+	// weaker reproduction, it is a different question.
+	//
+	// ERE fixes both, and a literal is escaped into it rather than declared with
+	// -F. RE2 is far closer to ERE than to BRE, so this is also the honest
+	// translation of what actually ran.
+	//
+	// -c and -l return before reaching here, deliberately: they are
+	// machine-readable output and a caller may be piping them. DECIDED
+	// 2026-08-10, when an audit found the invariant had been false for those two
+	// paths since the first commit and nothing had ever declared it. Pinned by
+	// TestPrintMatchesKeepsMachineReadableOutputClean.
 	fmt.Fprintf(w, "\n--- grep equivalent (worse: line-based, misses anything the wrap split) ---\n")
 	flags := "-rn"
 	if !o.CaseSens {
 		flags += "i"
 	}
-	if o.Literal {
-		flags += "F"
-	}
+	flags += "E"
 	if o.Invert {
 		flags += "v"
 	}
 	for _, p := range patterns {
-		fmt.Fprintf(w, "  grep %s %q %s\n", flags, p, root)
+		if o.Literal {
+			p = regexp.QuoteMeta(p)
+		}
+		// The root is quoted too: a directory with a space in it used to print as
+		// two arguments, which is the same half of the invariant one level over.
+		fmt.Fprintf(w, "  grep %s %s %s\n", flags, shellQuote(p), shellQuote(root))
 	}
 	fmt.Fprintf(w, "\nmatching units: %d\n", len(ms))
 }
