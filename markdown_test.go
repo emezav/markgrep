@@ -289,3 +289,55 @@ func readmeKinds(t *testing.T) []string {
 	t.Fatalf("README.md has no line containing %q; the guard cannot locate the kind list", marker)
 	return nil
 }
+
+// Inside a fence a line break is content, not a wrap. A phrase built from the
+// end of one command and the start of the next exists in no command anyone
+// could copy, and returning it is the false positive this tool exists to
+// remove. Measured before deciding: 214 such adjacencies in 124 documents, and
+// every one of them joined two unrelated lines.
+func TestFencedLinesDoNotJoinAcrossCommands(t *testing.T) {
+	doc := "```sh\ngit clone x .stele && rm -rf .stele/.git\n# alternativa con npx\n```\n"
+	u := Parse("t.md", doc)
+	if len(u) != 1 || u[0].Kind != "code" {
+		t.Fatalf("expected one code unit, got %d", len(u))
+	}
+	flat := u[0].Flat()
+	if strings.Contains(flat, "rm -rf .stele/.git # alternativa") {
+		t.Errorf("a phrase across two unrelated command lines still matches:\n%q", flat)
+	}
+	// The negative control, in the same test: each line is still findable whole.
+	for _, want := range []string{"rm -rf .stele/.git", "# alternativa con npx"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("the line itself stopped being findable: %q not in %q", want, flat)
+		}
+	}
+}
+
+// The one case that argued for the old behaviour: a backslash continues the
+// line, so the two are one command and a phrase across them is real. The
+// backslash is dropped so the logical command reads as written.
+func TestFencedContinuationStillJoins(t *testing.T) {
+	// Built by concatenation so the continuation backslash is unambiguous: an
+	// escaped one inside an interpreted string is exactly the character a shell
+	// here-document eats, and it did while this test was being written.
+	doc := "```sh\n" + `grep -rn foo \` + "\n  --include=bar baz\n```\n"
+	u := Parse("t.md", doc)
+	flat := u[0].Flat()
+	if !strings.Contains(flat, "grep -rn foo --include=bar baz") {
+		t.Errorf("a continuation must read as one command:\n%q", flat)
+	}
+	if strings.Contains(flat, "\\") {
+		t.Errorf("the continuation backslash should not survive into the searchable form:\n%q", flat)
+	}
+}
+
+// The founding case must be untouched: outside a fence, a hard wrap is still
+// crossed. This is the whole reason the tool exists, and the change above is
+// only safe because it is scoped to one kind.
+func TestProseStillCrossesItsWraps(t *testing.T) {
+	doc := "a phrase that the author\nwrapped in the middle\n"
+	u := Parse("t.md", doc)
+	if got := u[0].Flat(); !strings.Contains(got, "the author wrapped in the middle") {
+		t.Errorf("prose stopped crossing a wrap, which is the founding case:\n%q", got)
+	}
+}

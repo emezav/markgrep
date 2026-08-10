@@ -51,7 +51,52 @@ func (u Unit) Flat() string { return u.FlatWith(LinksText) }
 // identifiers (audit_log, max_retries) and stripping them would break the
 // queries that do work.
 func (u Unit) FlatWith(links string) string {
+	if u.Kind == "code" {
+		return flatCode(u.Lines, links)
+	}
 	return NormalizeWith(strings.Join(u.Lines, " "), links)
+}
+
+// flatCode flattens a code block WITHOUT joining its lines into one run.
+//
+// The reason the rest of this file collapses newlines does not hold here.
+// Outside a fence a line break is where the author's editor happened to wrap,
+// and a phrase crossing it is a phrase somebody wrote; inside a fence the break
+// is content, so a phrase crossing it exists in no command anyone could copy.
+// Returning it is a false positive of exactly the family this tool exists to
+// remove -- measured on 2026-08-09 over 124 documents: flattening created 214
+// adjacencies inside fences and every one of them joined two unrelated lines.
+//
+// The exception is the one case that argued for the old behaviour: a line
+// ending in a backslash CONTINUES into the next, so the two are one command and
+// a phrase across them is real. Those are joined with a space and the backslash
+// is dropped, which is what makes the logical command searchable as written.
+//
+// Note that `strings.Fields` inside NormalizeWith collapses newlines too, so
+// normalizing has to happen per segment rather than over the joined text. That
+// is why this cannot be a one-line change to the separator.
+func flatCode(lines []string, links string) string {
+	var out []string
+	var cur strings.Builder
+	for _, l := range lines {
+		t := strings.TrimRight(l, " \t")
+		cont := strings.HasSuffix(t, `\`)
+		if cont {
+			t = strings.TrimSuffix(t, `\`)
+		}
+		if cur.Len() > 0 {
+			cur.WriteString(" ")
+		}
+		cur.WriteString(NormalizeWith(t, links))
+		if !cont {
+			out = append(out, cur.String())
+			cur.Reset()
+		}
+	}
+	if cur.Len() > 0 {
+		out = append(out, cur.String())
+	}
+	return strings.Join(out, "\n")
 }
 
 var (
