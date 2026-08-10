@@ -294,7 +294,7 @@ func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []De
 		}
 		joined := strings.Join(said, " | ")
 
-		// Three ways to be BROKEN, and the first two are about the detector's
+		// The ways to be BROKEN, and the first two are about the detector's
 		// ability to look rather than its result. A detector that cannot say
 		// whether it could measure is in the same position as one that cannot
 		// prove it measures, and a control run on an input the detector would
