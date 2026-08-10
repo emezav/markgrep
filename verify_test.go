@@ -37,7 +37,7 @@ func TestEveryControlInputIsApplicable(t *testing.T) {
 		if d.Applicable == nil {
 			continue // the test above owns that failure; do not panic on top of it
 		}
-		input, _ := d.Control()
+		input, _, _ := d.Control()
 		if ok, why := d.Applicable(input); !ok {
 			t.Errorf("detector %q runs its control on an input it would refuse (%s)", d.Name, why)
 		}
@@ -55,8 +55,8 @@ func TestDetectorWithoutApplicabilityIsBroken(t *testing.T) {
 		Name:  "bare",
 		Desc:  "a detector someone forgot to finish",
 		Check: raggedColumns,
-		Control: func() ([]string, int) {
-			return []string{"| a | b |", "| --- | --- |", "| 1 | 2 | 3 |"}, 1
+		Control: func() ([]string, int, string) {
+			return []string{"| a | b |", "| --- | --- |", "| 1 | 2 | 3 |"}, 1, ""
 		},
 	}
 	out, _, broken, _ := run(t, []string{"| a | b |", "| --- | --- |", "| 1 | 2 |"}, []Detector{bare})
@@ -78,7 +78,7 @@ func TestControlOnRefusedInputIsBroken(t *testing.T) {
 		Name:       "crooked",
 		Desc:       "its control input is not one it accepts",
 		Check:      raggedColumns,
-		Control:    func() ([]string, int) { return []string{"no table here at all"}, 0 },
+		Control:    func() ([]string, int, string) { return []string{"no table here at all"}, 0, "" },
 		Applicable: hasComparableTable,
 	}
 	out, _, broken, _ := run(t, []string{"| a | b |", "| --- | --- |", "| 1 | 2 |"}, []Detector{crooked})
@@ -252,5 +252,53 @@ func TestApplicableInputStillReportsFindings(t *testing.T) {
 	}
 	if measured != 2 {
 		t.Errorf("both detectors could measure this input, got measured=%d", measured)
+	}
+}
+
+// The fourth way to be BROKEN, and the reason it exists: a count of findings is
+// invariant under any bug that changes WHAT a finding says without changing HOW
+// MANY there are. Measured by making nonASCII iterate bytes: the message went
+// from "1 character(s)" to "2", visibly wrong, and the old control still said
+// MEASURES because both are one finding on one line.
+func TestControlChecksWhatTheFindingSays(t *testing.T) {
+	// A detector whose check reports something other than what its control
+	// declares. The count matches; only the message differs.
+	lying := Detector{
+		Name: "lying",
+		Desc: "its finding says something else",
+		Check: func(lines []string) []Finding {
+			return []Finding{{1, "7 character(s) outside ASCII"}}
+		},
+		Control: func() ([]string, int, string) {
+			return []string{"anything"}, 1, "1 character(s)"
+		},
+		Applicable: hasContent,
+	}
+	out, _, broken, _ := run(t, []string{"a line"}, []Detector{lying})
+	if broken != 1 {
+		t.Fatalf("a finding that does not say what the control declares must be BROKEN, got %d", broken)
+	}
+	if !strings.Contains(out, "does not say") {
+		t.Errorf("the output does not name the reason:\n%s", out)
+	}
+	// The negative control, in the same test: the same shape with a message that
+	// DOES match must measure.
+	honest := lying
+	honest.Check = func(lines []string) []Finding {
+		return []Finding{{1, "1 character(s) outside ASCII"}}
+	}
+	out, _, broken, _ = run(t, []string{"a line"}, []Detector{honest})
+	if broken != 0 {
+		t.Fatalf("a matching message must not be BROKEN, got %d\n%s", broken, out)
+	}
+}
+
+// Every control must declare what its finding says, or it can only ever check a
+// count -- and a count is invariant under the class of bug above.
+func TestEveryControlDeclaresWhatItExpectsToSee(t *testing.T) {
+	for _, d := range Detectors() {
+		if _, _, wants := d.Control(); wants == "" {
+			t.Errorf("detector %q declares no expected message, so its control cannot vary with the defect", d.Name)
+		}
 	}
 }

@@ -21,8 +21,19 @@ type Detector struct {
 	Name  string
 	Desc  string
 	Check func(lines []string) []Finding
-	// Control returns a test input and how many findings it MUST produce.
-	Control func() (input []string, expected int)
+	// Control returns a test input, how many findings it MUST produce, and a
+	// fragment those findings MUST contain.
+	//
+	// The fragment is not decoration. A count of findings is invariant under any
+	// bug that changes WHAT a finding says without changing HOW MANY there are --
+	// measured on 2026-08-09 by making `nonASCII` iterate bytes instead of runes:
+	// the output went from "1 character(s) outside ASCII" to "2", visibly wrong,
+	// and the control still printed MEASURES because both are one finding on one
+	// line. **A control whose expectation cannot vary with the defect certifies
+	// it.** The fragment is what makes this one able to fail. Found by applying a
+	// rule stele derived from our own 94.1%: a number without an expectation that
+	// something could violate is decoration.
+	Control func() (input []string, expected int, wants string)
 	// Applicable reports whether THIS input can exercise Check at all, and says
 	// why not when it cannot.
 	//
@@ -175,10 +186,12 @@ func Detectors() []Detector {
 			Name:  "ascii",
 			Desc:  "no character outside printable ASCII",
 			Check: nonASCII,
-			Control: func() ([]string, int) {
-				// If this does not return 1, the detector is not looking at what
-				// it claims to look at.
-				return []string{"a line with an n-tilde: año"}, 1
+			Control: func() ([]string, int, string) {
+				// One finding, and it must say ONE character. The n-tilde is one
+				// character and two bytes, which is written down in
+				// bitacora/memory.md -- so this expectation was derivable from
+				// something the project already had, not invented here.
+				return []string{"a line with an n-tilde: año"}, 1, "1 character(s)"
 			},
 			Applicable: hasContent,
 		},
@@ -201,7 +214,7 @@ func Detectors() []Detector {
 			// that is content (so counting it goes BROKEN), and a fenced block
 			// whose lines start with a pipe (so reading them as rows goes
 			// BROKEN). Exactly one row is really ragged.
-			Control: func() ([]string, int) {
+			Control: func() ([]string, int, string) {
 				return []string{
 					"| a | b |",
 					"| --- | --- |",
@@ -217,7 +230,7 @@ func Detectors() []Detector {
 					"| a drawing | not | a table |",
 					"| shorter |",
 					"```",
-				}, 1
+				}, 1, "2 columns; the header (line 5) has 3"
 			},
 			Applicable: hasComparableTable,
 		},
@@ -272,8 +285,14 @@ func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []De
 	fmt.Fprintf(w, "scope: %s\n", scope)
 
 	for _, d := range ds {
-		input, expected := d.Control()
-		got := len(d.Check(input))
+		input, expected, wants := d.Control()
+		found := d.Check(input)
+		got := len(found)
+		var said []string
+		for _, f := range found {
+			said = append(said, f.What)
+		}
+		joined := strings.Join(said, " | ")
 
 		// Three ways to be BROKEN, and the first two are about the detector's
 		// ability to look rather than its result. A detector that cannot say
@@ -286,6 +305,8 @@ func verifyWith(w io.Writer, path string, lines []string, lastOnly bool, ds []De
 			state, why = "BROKEN", "no applicability check"
 		case got != expected:
 			state, why = "BROKEN", "the control did not produce what it must"
+		case wants != "" && !strings.Contains(joined, wants):
+			state, why = "BROKEN", fmt.Sprintf("the finding does not say %q", wants)
 		default:
 			if ok, _ := d.Applicable(input); !ok {
 				state, why = "BROKEN", "the control input is one this detector would refuse"
