@@ -341,3 +341,79 @@ func TestProseStillCrossesItsWraps(t *testing.T) {
 		t.Errorf("prose stopped crossing a wrap, which is the founding case:\n%q", got)
 	}
 }
+
+// A nested item qualifies a claim that is not inside it, so alone it can read as
+// nonsense. Every unit already carries its nearest heading for that reason; this
+// is the same reason one level down. Measured before building it: 25 nested items
+// in the corpus, against 0 reference links and 0 real footnotes.
+func TestNestedItemCarriesItsParent(t *testing.T) {
+	doc := "## H\n\n- the outer claim\n  - the inner one\n- another outer\n"
+	u := Parse("t.md", doc)
+	var inner, outer1, outer2 *Unit
+	for i := range u {
+		switch {
+		case strings.Contains(u[i].Flat(), "the inner one"):
+			inner = &u[i]
+		case strings.Contains(u[i].Flat(), "the outer claim"):
+			outer1 = &u[i]
+		case strings.Contains(u[i].Flat(), "another outer"):
+			outer2 = &u[i]
+		}
+	}
+	if inner == nil || outer1 == nil || outer2 == nil {
+		t.Fatalf("expected three item units, got %d", len(u))
+	}
+	if !strings.Contains(inner.Parent, "the outer claim") {
+		t.Errorf("the nested item does not name what it hangs from: %q", inner.Parent)
+	}
+	// The controls, in the same test so they cannot drift apart: neither
+	// top-level item has a parent, including the one AFTER a nested list.
+	if outer1.Parent != "" {
+		t.Errorf("a top-level item must have no parent, got %q", outer1.Parent)
+	}
+	if outer2.Parent != "" {
+		t.Errorf("the item after a nested list must have no parent, got %q", outer2.Parent)
+	}
+}
+
+// The parent is the NEAREST enclosing item, not the outermost one.
+func TestDeepNestingTakesTheNearestParent(t *testing.T) {
+	doc := "- level one\n  - level two\n    - level three\n"
+	u := Parse("t.md", doc)
+	for _, x := range u {
+		if strings.Contains(x.Flat(), "level three") {
+			if !strings.Contains(x.Parent, "level two") {
+				t.Errorf("want the nearest parent, got %q", x.Parent)
+			}
+			if strings.Contains(x.Parent, "level one") {
+				t.Errorf("took the outermost instead of the nearest: %q", x.Parent)
+			}
+			return
+		}
+	}
+	t.Fatal("the deepest item was not parsed")
+}
+
+// A heading closes the list. Without this a later item inherits a parent from a
+// list that ended pages earlier, which is the columns defect in another costume.
+func TestAHeadingClosesTheNesting(t *testing.T) {
+	doc := "- outer\n  - inner\n\n## Another heading\n\n- a later item\n"
+	u := Parse("t.md", doc)
+	for _, x := range u {
+		if strings.Contains(x.Flat(), "a later item") && x.Parent != "" {
+			t.Errorf("a heading must close the list, got parent %q", x.Parent)
+		}
+	}
+}
+
+// The invariant that keeps this from being a contract change: the parent is
+// OUTPUT, never searchable text. A phrase spanning parent and child must not
+// match, because those are two claims and nobody wrote them as one.
+func TestTheParentIsNotSearchable(t *testing.T) {
+	doc := "- the outer claim\n  - the inner one\n"
+	for _, x := range Parse("t.md", doc) {
+		if strings.Contains(x.Flat(), "the outer claim the inner one") {
+			t.Errorf("the parent leaked into the searchable form: %q", x.Flat())
+		}
+	}
+}

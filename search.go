@@ -155,6 +155,12 @@ func PrintMatches(w io.Writer, ms []Match, patterns []string, root string, raw b
 		if len(m.Patterns) > 0 {
 			fmt.Fprintf(w, "  hit: %s\n", strings.Join(m.Patterns, " | "))
 		}
+		// A nested item alone can read as nonsense: it qualifies a claim that is
+		// not in the unit. Every unit already carries its nearest heading for the
+		// same reason, and this is that reason one level down.
+		if m.U.Parent != "" {
+			fmt.Fprintf(w, "  under: %s\n", clip(m.U.Parent, 200))
+		}
 		text := m.U.Raw()
 		if !raw {
 			text = clip(m.U.FlatWith(o.Links), 600)

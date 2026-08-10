@@ -16,6 +16,7 @@ type Unit struct {
 	Path    string
 	Line    int    // 1-based, first line of the unit
 	Heading string // nearest section heading above it
+	Parent  string // for a nested list item: the item it hangs from
 	Kind    string // paragraph | item | code | table | heading | quote | frontmatter | html
 	Lines   []string
 }
@@ -194,6 +195,27 @@ func isListItem(l string) bool {
 	return i > 0 && i+1 < len(t) && (t[i] == '.' || t[i] == ')') && t[i+1] == ' '
 }
 
+// indentOf reports how deep a line sits, counting a tab as four columns.
+//
+// It exists for one job -- telling a nested list item from its parent -- and it
+// is deliberately not CommonMark's rule, which measures against the parent's
+// content column. That fidelity would buy nothing here: the question is only
+// which item a nested one hangs from.
+func indentOf(l string) int {
+	n := 0
+	for _, r := range l {
+		switch r {
+		case ' ':
+			n++
+		case '\t':
+			n += 4
+		default:
+			return n
+		}
+	}
+	return n
+}
+
 func isTableRow(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), "|") }
 
 // isTableSeparator reports the `| --- | --- |` row under a table header. It
@@ -253,11 +275,18 @@ func Parse(path string, content string) []Unit {
 
 	i := 0
 	if n := frontMatter(lines); n > 0 {
-		out = append(out, Unit{path, 1, "", "frontmatter", lines[0:n]})
+		out = append(out, Unit{Path: path, Line: 1, Kind: "frontmatter", Lines: lines[0:n]})
 		i = n
 	}
 
 	lastKind := ""
+	// One entry per open nesting level, so a nested item can name the item it
+	// hangs from. A unit already carries its nearest heading; nesting is the
+	// same problem one level down, and the answer is the same shape.
+	var open []struct {
+		indent int
+		text   string
+	}
 	for i < len(lines) {
 		l := lines[i]
 
@@ -271,7 +300,7 @@ func Parse(path string, content string) []Unit {
 					break
 				}
 			}
-			out = append(out, Unit{path, start + 1, heading, "code", lines[start:i]})
+			out = append(out, Unit{Path: path, Line: start + 1, Heading: heading, Kind: "code", Lines: lines[start:i]})
 			lastKind = "code"
 			continue
 		}
@@ -283,7 +312,7 @@ func Parse(path string, content string) []Unit {
 
 		if h, ok := isHeading(l); ok {
 			heading = h
-			out = append(out, Unit{path, i + 1, heading, "heading", []string{l}})
+			out = append(out, Unit{Path: path, Line: i + 1, Heading: heading, Kind: "heading", Lines: []string{l}})
 			i++
 			lastKind = "heading"
 			continue
@@ -306,7 +335,7 @@ func Parse(path string, content string) []Unit {
 					}
 				}
 				if closed {
-					out = append(out, Unit{path, start + 1, heading, "html", lines[start:j]})
+					out = append(out, Unit{Path: path, Line: start + 1, Heading: heading, Kind: "html", Lines: lines[start:j]})
 					i = j
 					lastKind = "html"
 					continue
@@ -316,7 +345,7 @@ func Parse(path string, content string) []Unit {
 				for j < len(lines) && strings.TrimSpace(lines[j]) != "" {
 					j++
 				}
-				out = append(out, Unit{path, start + 1, heading, "html", lines[start:j]})
+				out = append(out, Unit{Path: path, Line: start + 1, Heading: heading, Kind: "html", Lines: lines[start:j]})
 				i = j
 				lastKind = "html"
 				continue
@@ -328,7 +357,7 @@ func Parse(path string, content string) []Unit {
 		// skipped rather than made into an empty unit.
 		if isTableRow(l) {
 			if !isTableSeparator(l) {
-				out = append(out, Unit{path, i + 1, heading, "table", []string{l}})
+				out = append(out, Unit{Path: path, Line: i + 1, Heading: heading, Kind: "table", Lines: []string{l}})
 				lastKind = "table"
 			}
 			i++
@@ -348,7 +377,7 @@ func Parse(path string, content string) []Unit {
 				i++
 			}
 			i = last + 1
-			out = append(out, Unit{path, start + 1, heading, "code", lines[start:i]})
+			out = append(out, Unit{Path: path, Line: start + 1, Heading: heading, Kind: "code", Lines: lines[start:i]})
 			lastKind = "code"
 			continue
 		}
@@ -359,6 +388,22 @@ func Parse(path string, content string) []Unit {
 			kind = "item"
 		case isQuote(l):
 			kind = "quote"
+		}
+
+		// A nested item hangs from the nearest less-indented one still open.
+		// Anything that is not an item closes the list: a heading, a paragraph
+		// or a table ends the nesting, and a blank line never reaches here.
+		parent := ""
+		if kind == "item" {
+			ind := indentOf(l)
+			for len(open) > 0 && open[len(open)-1].indent >= ind {
+				open = open[:len(open)-1]
+			}
+			if len(open) > 0 {
+				parent = open[len(open)-1].text
+			}
+		} else {
+			open = open[:0]
 		}
 
 		start := i
@@ -393,11 +438,18 @@ func Parse(path string, content string) []Unit {
 
 		if setext > 0 {
 			heading = strings.TrimSpace(strings.Join(lines[start:i-1], " "))
-			out = append(out, Unit{path, start + 1, heading, "heading", lines[start:i]})
+			out = append(out, Unit{Path: path, Line: start + 1, Heading: heading, Kind: "heading", Lines: lines[start:i]})
 			lastKind = "heading"
 			continue
 		}
-		out = append(out, Unit{path, start + 1, heading, kind, lines[start:i]})
+		u := Unit{Path: path, Line: start + 1, Heading: heading, Parent: parent, Kind: kind, Lines: lines[start:i]}
+		out = append(out, u)
+		if kind == "item" {
+			open = append(open, struct {
+				indent int
+				text   string
+			}{indentOf(l), u.Flat()})
+		}
 		lastKind = kind
 	}
 	return out
