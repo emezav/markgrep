@@ -173,6 +173,16 @@ func PrintMatches(w io.Writer, ms []Match, patterns []string, root string, raw b
 	// Invariant: the fallback is not theoretical. Whoever lacks this tool can
 	// reproduce the search worse but reproduce it -- and whoever has it can drop
 	// it without losing anything.
+	//
+	// KNOWN EXCEPTION, and it lives here because this is where the invariant is
+	// stated. Search is case-insensitive by default, so under -F the command
+	// below carries -iF. On at least one platform -- GNU grep 3.0 over the MSYS2
+	// runtime, which is where this project is developed -- `grep -iF` aborts with
+	// SIGABRT (exit 134) and empty output, on any file. There the printed command
+	// reproduces nothing and this invariant is false. It is not worked around,
+	// because the command is correct GNU grep and every frame of the stackdump is
+	// in the MSYS2 runtime, so the defect is a layer below. Whoever hits it: check
+	// the exit code, and use -i without -F over an escaped pattern.
 	fmt.Fprintf(w, "\n--- grep equivalent (worse: line-based, misses anything the wrap split) ---\n")
 	flags := "-rn"
 	if !o.CaseSens {
