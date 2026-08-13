@@ -205,6 +205,26 @@ declared with `-F`. Two reasons, both found by going to run it:
 they exist to be piped, and a caller counting lines should get lines. Run the search
 without them to get the command.
 
+## Emphasis is removed before matching, and that can look like a bug
+
+`markgrep` matches against the flattened unit, and flattening removes inline emphasis -- asterisk,
+backtick and tilde. That is the point: a `**bold**` in the middle of a sentence would otherwise split
+a phrase nobody wrote as split.
+
+The consequence is worth knowing before it costs you an afternoon:
+
+```console
+$ markgrep search -e '^- item' --kind item --in notes.md   # every item
+$ markgrep search -e '^- \*item' --kind item --in notes.md  # nothing
+```
+
+The **list marker is kept** and the asterisks are not, so a pattern copied out of `--raw` or out of
+the source does not match in regex mode. Under `-F` it does, because the pattern is normalized the
+same way. An empty result whose pattern carries one of those marks says so.
+
+The underscore is **not** removed: `_emph_` survives where `*emph*` does not, because underscores
+belong to identifiers like `audit_log`.
+
 ## What it will not do
 
 - **No verdicts.** It never says "this is orphaned" or "this is clean".

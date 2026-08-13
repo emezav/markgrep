@@ -155,6 +155,28 @@ func PrintMatches(w io.Writer, ms []Match, patterns []string, root string, raw b
 
 	if len(ms) == 0 {
 		fmt.Fprintf(w, "no matches for %d phrasing(s) in %s\n", len(patterns), root)
+		// The one zero this tool could not explain, reported by stele in their
+		// letter 113 after it cost them a real count: --raw shows the source
+		// with its asterisks, matching runs against the flattened text without
+		// them, and nothing said so. The block marker survives, which is what
+		// makes it convincing -- `^-` finds every item and `^- \*` finds none,
+		// so the corpus and the pattern both look right.
+		//
+		// Only on the empty path, and only in regex mode: under -F the pattern
+		// is normalized too, so that search already works and this advice would
+		// be wrong. A regex whose asterisk is a legitimate quantifier trips it;
+		// that costs one line on a result that was empty anyway.
+		if !o.Literal {
+			for _, p := range patterns {
+				if strings.ContainsAny(p, InlineMarks) {
+					fmt.Fprintf(w, "note: the pattern carries one of %q, which are removed from the text\n",
+						InlineMarks)
+					fmt.Fprintf(w, "      before matching. The block marker is kept. Try -F, which\n")
+					fmt.Fprintf(w, "      normalizes the pattern the same way.\n")
+					break
+				}
+			}
+		}
 	}
 	for _, m := range ms {
 		h := m.U.Heading

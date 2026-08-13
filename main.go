@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const version = "0.10.0"
+const version = "0.11.0"
 
 // usage is built rather than written, because the list of kinds had two homes
 // and they drifted: adding `html` updated Kinds and left the help text stale.
@@ -40,6 +40,13 @@ Own:
                    one unit per table ROW; unknown names are refused, not ignored
   --links MODE     text (default) | url | both -- what a [text](url) contributes
   --raw            print the unit with its line breaks; flattened by default
+
+INLINE EMPHASIS IS REMOVED BEFORE MATCHING -- asterisk, backtick and tilde -- so a
+pattern copied from --raw or from the source does not match in regex mode:
+"^- *item" finds nothing where "^- item" finds every item, because the LIST MARKER
+is kept and the asterisks are not. -F normalizes the pattern the same way, so
+under -F the copied text does match. The underscore is NOT removed: _emph_
+survives where *emph* does not, because underscores belong to identifiers.
 
 ONE DELIBERATE DIFFERENCE from grep: search is case INSENSITIVE by default. On a
 prose corpus that is what serves; ask for case sensitivity with -s. Said out

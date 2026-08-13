@@ -173,6 +173,68 @@ func TestPrintMatchesCountAndFilesOnly(t *testing.T) {
 	}
 }
 
+// An empty result whose pattern carries inline markup is the one zero this tool
+// could not explain. Reported by stele, letter 113, after it cost them a real
+// count: `--raw` shows the source with its asterisks, the engine matches against
+// the flattened text without them, and nothing said so. Confirmed here and
+// generalised -- `*`, backtick and `~` are absent from the searched text in all
+// eight kinds, while the block marker survives, which is why `^-` finds three
+// items and `^- \*` finds none.
+//
+// The note goes on the empty path only, and only in regex mode: under -F the
+// pattern is normalized too, so the same search already works and telling the
+// user to try -F would be wrong.
+func TestEmptyResultExplainsInlineMarkupInThePattern(t *testing.T) {
+	for _, c := range []struct {
+		name string
+		pat  string
+		o    Options
+		want bool
+	}{
+		{"asterisk in a regex", `^- \*item`, Options{}, true},
+		{"backtick in a regex", "`code`", Options{}, true},
+		{"tilde in a regex", "~del~", Options{}, true},
+		{"a plain pattern says nothing extra", "absent", Options{}, false},
+		{"literal mode already works, so no advice", "*item*", Options{Literal: true}, false},
+		{"underscore survives, so it is not the cause", "_under_", Options{}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			PrintMatches(&buf, nil, []string{c.pat}, ".", false, c.o)
+			got := strings.Contains(buf.String(), "removed from the text")
+			if got != c.want {
+				t.Errorf("note present = %v, want %v, for %q:\n%s", got, c.want, c.pat, buf.String())
+			}
+		})
+	}
+}
+
+// A non-empty result must not carry it, and neither must the machine-readable
+// paths, which return before this block and stay clean by the decision of
+// 2026-08-10.
+func TestTheInlineMarkupNoteStaysOffEveryOtherPath(t *testing.T) {
+	units := parse("something findable\n")
+	ms := mustSearch(t, units, []string{"findable"}, Options{})
+
+	for _, c := range []struct {
+		name string
+		ms   []Match
+		o    Options
+	}{
+		{"a hit", ms, Options{}},
+		{"-c", nil, Options{Count: true}},
+		{"-l", nil, Options{FilesOnly: true}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			PrintMatches(&buf, c.ms, []string{`\*findable`}, ".", false, c.o)
+			if strings.Contains(buf.String(), "removed from the text") {
+				t.Errorf("%s must not carry the note:\n%s", c.name, buf.String())
+			}
+		})
+	}
+}
+
 func TestPrintMatchesSaysSoWhenThereAreNone(t *testing.T) {
 	var buf bytes.Buffer
 	PrintMatches(&buf, nil, []string{"absent"}, "docs/", false, Options{})

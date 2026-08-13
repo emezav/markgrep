@@ -146,9 +146,30 @@ func NormalizeWith(s, links string) string {
 	// the exception -- it separates, so it leaves a space behind.
 	s = reBreakTag.ReplaceAllString(s, " ")
 	s = reHTMLTag.ReplaceAllString(s, "")
-	s = strings.NewReplacer("*", "", "`", "", "~", "").Replace(s)
+	s = inlineStripper.Replace(s)
 	return strings.Join(strings.Fields(s), " ")
 }
+
+// InlineMarks are the inline emphasis characters removed from the searchable
+// text. The underscore is deliberately NOT among them: in technical prose it is
+// part of identifiers like audit_log, so stripping it would break the queries
+// that do work -- which means `_emph_` survives where `*emph*` does not, and
+// that asymmetry is real and worth knowing.
+//
+// This set has ONE home because it now has two readers. `search.go` consults it
+// to explain an empty result whose pattern carries one of these, and a second
+// copy there would drift the day a fourth mark is added -- the shape this
+// project already paid for once, when the --kind help listed seven names and the
+// validator accepted eight.
+const InlineMarks = "*`~"
+
+var inlineStripper = func() *strings.Replacer {
+	pairs := make([]string, 0, 2*len(InlineMarks))
+	for _, r := range InlineMarks {
+		pairs = append(pairs, string(r), "")
+	}
+	return strings.NewReplacer(pairs...)
+}()
 
 func isHeading(l string) (string, bool) {
 	t := strings.TrimLeft(l, " ")
