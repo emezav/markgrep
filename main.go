@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-const version = "0.11.0"
+const version = "0.11.1"
 
 // usage is built rather than written, because the list of kinds had two homes
 // and they drifted: adding `html` updated Kinds and left the help text stale.

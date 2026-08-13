@@ -155,6 +155,29 @@ func hasContent(lines []string) (bool, string) {
 	return false, "the input has no content"
 }
 
+// unquote strips one level of blockquote marker so the SAME table walker can be
+// asked a second question -- "would there be rows if this were not quoted?" --
+// without anyone writing a second definition of what a table row is.
+//
+// It is used only to explain a refusal. Nothing measured ever comes from it: a
+// quote is one unit and stays one, and reporting ragged columns inside one would
+// silently change what a finding means, because a quoted table in a letter is
+// usually a table archived verbatim from somebody else.
+func unquote(lines []string) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		t := strings.TrimLeft(l, " ")
+		if strings.HasPrefix(t, ">") {
+			t = strings.TrimPrefix(t, ">")
+			t = strings.TrimPrefix(t, " ")
+			out[i] = t
+			continue
+		}
+		out[i] = l
+	}
+	return out
+}
+
 // hasComparableTable reports whether SOME table in the input has a header AND
 // at least one row to compare against it.
 //
@@ -166,6 +189,22 @@ func hasContent(lines []string) (bool, string) {
 func hasComparableTable(lines []string) (bool, string) {
 	rows := tableRows(lines)
 	if len(rows) == 0 {
+		// A refusal has to say WHICH refusal it is. stele reported, from their
+		// own archive, that "the input has no table" was false for every letter
+		// whose claims table sits inside a blockquote -- their convention -- and
+		// that a false "nothing here" reads exactly like "looked, and fine". It
+		// had been silently blind over 18 of their files, and over 14 of the 54
+		// letters in ours.
+		//
+		// The unit model does not change: a quote is a quote, and the check
+		// still measures nothing there. What changes is that the two refusals
+		// stop sounding alike. The question is asked by handing the SAME walker
+		// a stripped copy, never by writing a second notion of a table row --
+		// two of those in one binary is the shape this project has paid for
+		// twice.
+		if len(tableRows(unquote(lines))) > 0 {
+			return false, "the only table rows here live inside a blockquote, which this detector does not read"
+		}
 		return false, "the input has no table"
 	}
 	perTable := map[int]int{}

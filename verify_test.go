@@ -156,6 +156,53 @@ func TestHeaderWithoutRowsIsNotApplicable(t *testing.T) {
 	}
 }
 
+// A refusal has to say WHICH refusal it is. Reported by stele, letter 115, from
+// their own archive: their letters put the claims table inside a blockquote by
+// convention, so the detector answered "the input has no table" -- which is
+// false, and reads exactly like "I looked and it is fine". It had been silently
+// blind over 18 of their files. Measured here with the detector itself over our
+// own archive: of 54 letters, 39 looked at, 15 refused, and 14 of those 15 hold
+// a quoted row.
+//
+// The parser does not change and a quote stays one unit. What changes is that
+// the two refusals stop sounding alike.
+func TestARefusalSaysWhichRefusalItIs(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		lines []string
+		want  string
+	}{
+		{"nothing of the detector's kind", []string{"# Title", "", "just prose"},
+			"no table"},
+		{"a table, but inside a blockquote", []string{"> | a | b |", "> | --- | --- |", "> | 1 | 2 |"},
+			"blockquote"},
+		{"a header with no rows", []string{"| a | b |", "| --- | --- |"},
+			"row to compare"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ok, why := hasComparableTable(c.lines)
+			if ok {
+				t.Fatalf("none of these can exercise the check, got applicable")
+			}
+			if !strings.Contains(why, c.want) {
+				t.Errorf("the reason must say %q, got %q", c.want, why)
+			}
+		})
+	}
+}
+
+// And the quoted case must not become applicable by accident: the check reads no
+// rows there, so claiming it could measure would be the older defect inverted.
+func TestAQuotedTableIsStillNotMeasured(t *testing.T) {
+	quoted := []string{"> | a | b |", "> | --- | --- |", "> | 1 | 2 | 3 |"}
+	if len(tableRows(quoted)) != 0 {
+		t.Fatal("tableRows must not read inside a blockquote; the unit model says a quote is a quote")
+	}
+	if fs := raggedColumns(quoted); len(fs) != 0 {
+		t.Errorf("the check sees nothing there, so it must report nothing, got %v", fs)
+	}
+}
+
 // The reference is the row's OWN table, not the first table in the file. Before
 // this, a well-formed second table of a different width had every row reported:
 // 356 findings across 117 documents, of which 354 were this.
