@@ -16,6 +16,7 @@ CMakeUserPresets.json
 # Consequence, stated because it fails silently otherwise: for every path below, the effective
 # persistence is `ninguna` -- the local disk is the only record, with no diff and nothing to revert
 # to. See stele.config.md.
+# RESPALDO: ninguno -- no copy of these paths exists off this disk (declared 2026-11-01)
 bitacora/
 .stele/
 stele.config.md
