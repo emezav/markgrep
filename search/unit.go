@@ -15,7 +15,7 @@ import (
 type Unit struct {
 	Path    string
 	Line    int    // 1-based, first line of the unit
-	Heading string // nearest section heading above it
+	Heading string // nearest section heading above it; an ATX one keeps its "#" marks
 	Parent  string // for a nested list item: the item it hangs from
 	Kind    string // paragraph | item | code | table | heading | quote | frontmatter | html
 	Lines   []string

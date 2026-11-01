@@ -144,6 +144,18 @@ in grep: `--exclude a.md --exclude b.md` leaves both out, and a file passes if i
 any `--include`. **A glob that matches no file, or is malformed, exits 2** and names
 it, because a filter that filters nothing reads exactly like one that worked.
 
+**Nothing to search is refused too, with exit 2 and not 1.** A root with no markdown, an
+empty file, or filters that each match something and together leave nothing all end with
+zero units -- and zero matches over zero units reads exactly like a corpus that lacks the
+phrase. The same goes for a `--kind` that matches none of the units left:
+
+```console
+$ markgrep search -F -e "rule of thumb" --in docs/ --include a.md --exclude a.md
+0 files, 0 units under docs/ after the filters: nothing to search
+$ markgrep search -F -e "rule of thumb" --in docs/ --kind table
+--kind "table" matches none of the 40 units in 3 files: filter matches nothing
+```
+
 **One deliberate difference:** search is **case insensitive by default**. On a prose
 corpus that is what serves; ask for sensitivity with `-s`.
 
@@ -286,12 +298,15 @@ r, err := search.Run("docs/", []string{"rule of thumb"}, search.Options{
 })
 // r.Files and r.Units: the corpus after the filters.
 // r.Matches: each unit with its path, line, kind, heading and text.
+//   U.Heading keeps an ATX heading's "#" marks ("# memory"); U.Raw() is the text as
+//   written, while matching runs on the flattened form (U.FlatWith).
 // r.Grep: the equivalent grep command, one per phrasing.
 ```
 
 Every refusal is an error, never an empty result: an unknown kind, a malformed or dead
-glob (`errors.Is(err, search.ErrFilterMatchesNothing)`), a control that found nothing
-(`search.ErrControlFailed`). Pinning the module version in your `go.mod` records which
+glob or a `--kind` with no unit of its kind (`errors.Is(err,
+search.ErrFilterMatchesNothing)`), nothing left to search (`search.ErrEmptyCorpus`), a
+control that found nothing (`search.ErrControlFailed`). Pinning the module version in your `go.mod` records which
 markgrep you search with. The CLI is a thin layer over `Run`.
 
 ## Roadmap

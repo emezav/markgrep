@@ -8,7 +8,7 @@ import (
 	"github.com/emezav/markgrep/search"
 )
 
-const version = "0.12.0"
+const version = "0.13.0"
 
 // usage is built rather than written, because the list of kinds had two homes
 // and they drifted: adding `html` updated Kinds and left the help text stale.
@@ -39,7 +39,8 @@ read "unit"):
 Own:
   --in PATH        file or directory (default: .)
   --kind KIND[,..] {{kinds}} | any
-                   one unit per table ROW; unknown names are refused, not ignored
+                   one unit per table ROW; unknown names are refused, not ignored,
+                   and so is a kind that matches none of the units (exit 2)
   --links MODE     text (default) | url | both -- what a [text](url) contributes
   --raw            print the unit with its line breaks; flattened by default
   --control PHRASE a phrase known to be in the corpus; repeatable. Matched with the
@@ -63,7 +64,8 @@ translation. They are rejected with an explanation instead of half-implemented.
 
 Exit codes:  0 = matches   1 = no matches
              2 = error, BROKEN detector, nothing could measure the input,
-                 a filter that filters nothing, or a failed --control
+                 a filter that filters nothing, nothing left to search,
+                 or a failed --control
 
 It emits no verdicts: it says what is there and where it lives. The fallback is
 always grep, and every output prints the equivalent command.
@@ -162,8 +164,8 @@ func cmdSearch(args []string) {
 		}
 	}
 
-	// Every refusal -- an unknown kind, a malformed or dead glob, a control
-	// that found nothing -- is exit 2, because each of them would otherwise
+	// Every refusal -- an unknown or dead kind, a malformed or dead glob,
+	// nothing left to search, a control that found nothing -- is exit 2, because each of them would otherwise
 	// have reported a zero that reads exactly like "there is nothing there".
 	r, err := search.Run(root, pats, o)
 	if err != nil {

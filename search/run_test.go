@@ -166,6 +166,66 @@ func TestGrepEquivalentCarriesTheFilters(t *testing.T) {
 	}
 }
 
+// stele-mcp's sweep, letter 009: filters that each match something and together
+// leave nothing, and a root with no markdown, returned an empty Result and a nil
+// error. The empty .md is ours: one file and zero units, so the criterion is
+// units, not files. The control row is the same corpus with one live filter.
+func TestNothingToSearchIsAnError(t *testing.T) {
+	d := corpus(t)
+	nomd := t.TempDir()
+	write(t, filepath.Join(nomd, "notes.txt"), "integrated searcher\n")
+	empty := t.TempDir()
+	write(t, filepath.Join(empty, "empty.md"), "")
+	for _, c := range []struct {
+		name  string
+		root  string
+		o     Options
+		empty bool
+	}{
+		{"include and exclude cancel", d, Options{Include: []string{"latest.md"}, Exclude: []string{"latest.md"}}, true},
+		{"excludes drop every file", d, Options{Exclude: []string{"memory.md", "latest.md", "other.md"}}, true},
+		{"no markdown under the root", nomd, Options{}, true},
+		{"an empty markdown file", empty, Options{}, true},
+		{"live filter (control)", d, Options{Include: []string{"latest.md"}}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r, err := Run(c.root, []string{"integrated searcher"}, c.o)
+			if got := errors.Is(err, ErrEmptyCorpus); got != c.empty {
+				t.Errorf("empty corpus reported = %v, want %v (err: %v)", got, c.empty, err)
+			}
+			if c.empty && r.Matches != nil {
+				t.Errorf("an empty corpus must report no matches, got %v", paths(r.Matches))
+			}
+		})
+	}
+}
+
+// --kind table over a corpus with no table printed "1 units" -- counted before
+// --kind -- and exited 1: a dead filter one grain down from a dead --include.
+func TestAKindThatMatchesNoUnitIsAnError(t *testing.T) {
+	d := corpus(t)
+	for _, c := range []struct {
+		name string
+		o    Options
+		dead bool
+	}{
+		{"no table in the corpus", Options{Kind: "table"}, true},
+		{"its only item is excluded", Options{Kind: "item", Exclude: []string{"other.md"}}, true},
+		{"a live kind (control)", Options{Kind: "item"}, false},
+		{"a list with one live kind (control)", Options{Kind: "table,paragraph"}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			_, err := Run(d, []string{"integrated searcher"}, c.o)
+			if got := errors.Is(err, ErrFilterMatchesNothing); got != c.dead {
+				t.Errorf("dead --kind reported = %v, want %v (err: %v)", got, c.dead, err)
+			}
+			if c.dead && !strings.Contains(err.Error(), c.o.Kind) {
+				t.Errorf("the error must name the kind that did nothing: %v", err)
+			}
+		})
+	}
+}
+
 // Every refusal is an error and never an empty Result, because an empty Result
 // is the one answer that must not happen by accident.
 func TestRunRefusesInsteadOfReturningEmpty(t *testing.T) {

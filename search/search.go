@@ -68,10 +68,17 @@ type Options struct {
 }
 
 // ErrFilterMatchesNothing is returned when an --include or --exclude glob
-// matches none of the files collected. A filter that filters nothing reads
-// exactly like one that worked: the only trace was the corpus count, equal to
-// that of a search without the filter, which nobody has in front of them.
-var ErrFilterMatchesNothing = errors.New("filter matches no file")
+// matches none of the files collected, or a --kind none of the units left. A
+// filter that filters nothing reads exactly like one that worked: the only
+// trace was the corpus count, equal to that of a search without the filter,
+// which nobody has in front of them.
+var ErrFilterMatchesNothing = errors.New("filter matches nothing")
+
+// ErrEmptyCorpus is returned when no unit is left to search: a root with no
+// markdown, an empty file, or filters that each match something and together
+// leave nothing. Zero matches over zero units read exactly like a clean corpus,
+// and the CLI exited 1 for it. Found by stele-mcp's sweep, letter 009.
+var ErrEmptyCorpus = errors.New("nothing to search")
 
 // ErrControlFailed is returned when a Control phrase matches no unit.
 var ErrControlFailed = errors.New("positive control matched nothing")
@@ -84,6 +91,16 @@ func kindAllowed(kind, spec string) bool {
 	}
 	for _, k := range strings.Split(spec, ",") {
 		if strings.TrimSpace(k) == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// anyKind reports whether at least one unit passes the --kind spec.
+func anyKind(units []Unit, spec string) bool {
+	for _, u := range units {
+		if kindAllowed(u.Kind, spec) {
 			return true
 		}
 	}
@@ -340,8 +357,9 @@ type Result struct {
 // controls, match. Every refusal is an error, never an empty Result, because an
 // empty Result is the one answer this tool must not give by accident.
 //
-// On ErrControlFailed the Result still carries Files and Units, so the caller
-// can say which corpus failed to answer; Matches is nil.
+// On ErrControlFailed, ErrEmptyCorpus and a --kind that matched nothing the
+// Result still carries Files and Units, so the caller can say which corpus
+// failed to answer; Matches is nil.
 func Run(root string, patterns []string, o Options) (Result, error) {
 	if len(patterns) == 0 {
 		return Result{}, errors.New("at least one pattern is required (-e/-f)")
@@ -367,6 +385,18 @@ func Run(root string, patterns []string, o Options) (Result, error) {
 		return Result{}, err
 	}
 	r := Result{Files: files, Units: len(units), Grep: GrepEquivalent(patterns, root, o)}
+
+	// The criterion is units, not files: an empty .md is one file and nothing
+	// to search, and it exited 1 like any honest miss.
+	if len(units) == 0 {
+		return r, fmt.Errorf("%d files, 0 units under %s after the filters: %w", len(files), root, ErrEmptyCorpus)
+	}
+	// Same shape as a dead --include, one grain down: --kind table over a
+	// corpus with no table printed "1 units" (counted before --kind) and exit 1.
+	if !anyKind(units, o.Kind) {
+		return r, fmt.Errorf("--kind %q matches none of the %d units in %d files: %w",
+			o.Kind, len(units), len(files), ErrFilterMatchesNothing)
+	}
 
 	co := o
 	co.Invert = false

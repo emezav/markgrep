@@ -256,6 +256,8 @@ if(MARKGREP_BUILD_TESTS)
         # Repeated filters ACCUMULATE, as in grep. Until 0.12.0 the second --exclude
         # replaced the first, so this returned the hit from the file asked out
         # first. Found by stele-mcp, letter 005. The fixture is generated here.
+        # Since 0.13.0 excluding both leaves nothing to search, which is refused,
+        # so the accumulation shows as the refusal's "0 files".
         set(MARKGREP_FILTERS "${CMAKE_CURRENT_BINARY_DIR}/filters")
         file(WRITE "${MARKGREP_FILTERS}/a.md" "The integrated searcher lives here.
 ")
@@ -265,7 +267,7 @@ if(MARKGREP_BUILD_TESTS)
                  COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
                          --in "${MARKGREP_FILTERS}" --exclude a.md --exclude b.md)
         set_tests_properties(cli_search_excludes_accumulate PROPERTIES
-            PASS_REGULAR_EXPRESSION "corpus: 0 files")
+            PASS_REGULAR_EXPRESSION "0 files, 0 units .*nothing to search")
         add_test(NAME cli_search_includes_accumulate
                  COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
                          --in "${MARKGREP_FILTERS}" --include a.md --include b.md)
@@ -286,6 +288,20 @@ if(MARKGREP_BUILD_TESTS)
                          --in "${MARKGREP_FILTERS}" --control "zzqq absent")
         set_tests_properties(cli_search_failed_control_says_why PROPERTIES
             PASS_REGULAR_EXPRESSION "matched 0 of 2 units")
+
+        # Nothing left to search, and a --kind with no unit of its kind, are
+        # refused too (0.13.0, stele-mcp's letter 009). Until then both printed
+        # a corpus line and exited 1, the code of an honest miss.
+        add_test(NAME cli_search_empty_corpus_says_why
+                 COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
+                         --in "${MARKGREP_FILTERS}" --include a.md --exclude a.md)
+        set_tests_properties(cli_search_empty_corpus_says_why PROPERTIES
+            PASS_REGULAR_EXPRESSION "nothing to search")
+        add_test(NAME cli_search_dead_kind_says_why
+                 COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
+                         --in "${MARKGREP_FILTERS}" --kind table)
+        set_tests_properties(cli_search_dead_kind_says_why PROPERTIES
+            PASS_REGULAR_EXPRESSION "--kind \"table\" matches none of the 2 units")
 
         # Line-model flags are rejected with an explanation, not accepted.
         add_test(NAME cli_rejects_line_flags
