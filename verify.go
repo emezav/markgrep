@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"github.com/emezav/markgrep/search"
 )
 
 // Finding is something a check found. It is never a verdict about the document:
@@ -97,7 +99,7 @@ func tableRows(lines []string) []tableRow {
 	var out []tableRow
 	table, inTable, inFence := -1, false, false
 	for i, l := range lines {
-		if isFence(l) {
+		if search.IsFence(l) {
 			inFence = !inFence
 			inTable = false
 			continue

@@ -150,7 +150,11 @@ if(MARKGREP_STRIP)
     list(APPEND MARKGREP_GO_FLAGS "-ldflags=-s -w")
 endif()
 
-file(GLOB MARKGREP_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/*.go")
+# The library lives in search/ since 0.12.0. Without its own glob a change there
+# would not rebuild the binary, and `go build` would not be asked to notice.
+file(GLOB MARKGREP_SOURCES CONFIGURE_DEPENDS
+     "${CMAKE_CURRENT_SOURCE_DIR}/*.go"
+     "${CMAKE_CURRENT_SOURCE_DIR}/search/*.go")
 set(MARKGREP_DEPENDS ${MARKGREP_SOURCES} "${CMAKE_CURRENT_SOURCE_DIR}/go.mod")
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/go.sum")
     list(APPEND MARKGREP_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/go.sum")
@@ -248,6 +252,40 @@ if(MARKGREP_BUILD_TESTS)
                  COMMAND "${MARKGREP_BINARY}" verify --file "${MARKGREP_MEASURABLE}")
         set_tests_properties(cli_verify_measurable_clean PROPERTIES
             PASS_REGULAR_EXPRESSION "result: 0 findings")
+
+        # Repeated filters ACCUMULATE, as in grep. Until 0.12.0 the second --exclude
+        # replaced the first, so this returned the hit from the file asked out
+        # first. Found by stele-mcp, letter 005. The fixture is generated here.
+        set(MARKGREP_FILTERS "${CMAKE_CURRENT_BINARY_DIR}/filters")
+        file(WRITE "${MARKGREP_FILTERS}/a.md" "The integrated searcher lives here.
+")
+        file(WRITE "${MARKGREP_FILTERS}/b.md" "The integrated searcher also here.
+")
+        add_test(NAME cli_search_excludes_accumulate
+                 COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
+                         --in "${MARKGREP_FILTERS}" --exclude a.md --exclude b.md)
+        set_tests_properties(cli_search_excludes_accumulate PROPERTIES
+            PASS_REGULAR_EXPRESSION "corpus: 0 files")
+        add_test(NAME cli_search_includes_accumulate
+                 COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
+                         --in "${MARKGREP_FILTERS}" --include a.md --include b.md)
+        set_tests_properties(cli_search_includes_accumulate PROPERTIES
+            PASS_REGULAR_EXPRESSION "matching units: 2")
+
+        # A filter that filters nothing, and a control that finds nothing, are
+        # refused and say why. Only the message is pinned here: ctest stops
+        # checking the exit code once PASS_REGULAR_EXPRESSION is set. Exit 2 is
+        # pinned by the Go tests on search.Run and by the cmdSearch error path.
+        add_test(NAME cli_search_dead_filter_says_why
+                 COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
+                         --in "${MARKGREP_FILTERS}" --exclude "noexiste*.md")
+        set_tests_properties(cli_search_dead_filter_says_why PROPERTIES
+            PASS_REGULAR_EXPRESSION "matches none of the 2 files")
+        add_test(NAME cli_search_failed_control_says_why
+                 COMMAND "${MARKGREP_BINARY}" search -F -e "integrated searcher"
+                         --in "${MARKGREP_FILTERS}" --control "zzqq absent")
+        set_tests_properties(cli_search_failed_control_says_why PROPERTIES
+            PASS_REGULAR_EXPRESSION "matched 0 of 2 units")
 
         # Line-model flags are rejected with an explanation, not accepted.
         add_test(NAME cli_rejects_line_flags

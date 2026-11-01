@@ -1,4 +1,4 @@
-package main
+package search
 
 import (
 	"os"
@@ -260,7 +260,10 @@ func isHTMLBlockStart(l string) bool {
 	return reHTMLTag.MatchString(t) && strings.HasPrefix(t, "<")
 }
 func isQuote(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), ">") }
-func isFence(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), "```") }
+
+// IsFence is exported for verify, which must agree with Parse on where a fence
+// is: two notions of the same construct in one binary is a shape already paid for.
+func IsFence(l string) bool { return strings.HasPrefix(strings.TrimLeft(l, " "), "```") }
 
 // isIndentedCode reports the four-space (or tab) form of a code block. It is
 // only ever asked at the start of a block, because an indented line in the
@@ -311,11 +314,11 @@ func Parse(path string, content string) []Unit {
 	for i < len(lines) {
 		l := lines[i]
 
-		if isFence(l) {
+		if IsFence(l) {
 			start := i
 			i++
 			for i < len(lines) {
-				fence := isFence(lines[i])
+				fence := IsFence(lines[i])
 				i++
 				if fence {
 					break
@@ -438,7 +441,7 @@ func Parse(path string, content string) []Unit {
 			if _, ok := isHeading(s); ok {
 				break
 			}
-			if isFence(s) {
+			if IsFence(s) {
 				break
 			}
 			if kind == "item" && isListItem(s) {

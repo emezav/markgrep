@@ -139,6 +139,11 @@ markgrep search -e "do not record state" -e "unobservable state" --in docs/
 Where grep says *line*, read *unit*: `-e`, `-f`, `-F`, `-v`, `-l`, `-c`, `-i`, `-r`,
 `--include`, `--exclude`. Regular expressions work as you expect.
 
+`--include` and `--exclude` take a glob over the file's base name and **accumulate**, as
+in grep: `--exclude a.md --exclude b.md` leaves both out, and a file passes if it matches
+any `--include`. **A glob that matches no file, or is malformed, exits 2** and names
+it, because a filter that filters nothing reads exactly like one that worked.
+
 **One deliberate difference:** search is **case insensitive by default**. On a prose
 corpus that is what serves; ask for sensitivity with `-s`.
 
@@ -150,6 +155,7 @@ corpus that is what serves; ask for sensitivity with `-s`.
 | `--kind KIND[,...]` | Restrict to one or more unit kinds: `paragraph`, `item`, `code`, `table`, `heading`, `quote`, `frontmatter`, `html`, or `any` |
 | `--links MODE` | What a `[text](url)` contributes to the searchable form: `text` (default), `url`, or `both` |
 | `--raw` | Print the unit with its line breaks instead of flattened |
+| `--control PHRASE` | A phrase you know is in the corpus; repeatable. If it matches nothing, the whole search fails with exit 2 and reports nothing |
 
 **A name it does not know is refused, not ignored.** `--kind paragrph` exits 2 with the
 list of valid kinds, because filtering everything out and reporting zero is
@@ -167,6 +173,19 @@ notes.md:12  [paragraph]  ## Notes
 Without that, the URL sits between "idea" and "continues" and the query returns
 nothing -- the same false absence a hard wrap produces. Ask for the URLs with
 `--links url`, or for both with `--links both`.
+
+**A zero is worth what its control is worth.** `--control` runs a phrase you know is
+there with the same options and the same filters as the search (`-v` aside, which would
+make any corpus pass). If the corpus cannot find it, a zero from the real search says
+nothing about absence, so the search refuses to report one:
+
+```console
+$ markgrep search -F -e "rule of thumb" --control "known phrase" --in docs/ --kind item
+--control "known phrase" matched 0 of N units in M files with the same options; nothing is reported: positive control matched nothing
+```
+
+`N` and `M` are the corpus after the filters, so the refusal says which corpus failed to
+answer.
 
 ### Flags deliberately not implemented
 
@@ -200,6 +219,9 @@ declared with `-F`. Two reasons, both found by going to run it:
 - A regular expression handed to `grep` with no dialect flag is read as **BRE**, where
   alternation is a literal character. For `unit|line` markgrep matched three units and
   the command it printed matched one -- not a weaker reproduction, a different question.
+
+The file filters travel with it as `--include=` and `--exclude=`, which GNU grep
+reads the same way, so a filtered search does not print a command over the whole tree.
 
 **`-c` and `-l` do not print it**, and that is a decision rather than an oversight:
 they exist to be piped, and a caller counting lines should get lines. Run the search
@@ -247,6 +269,30 @@ What `markgrep` adds is markdown awareness: the **section heading** a match live
 under, **inline markup normalization**, and unit kinds (item, table, code, quote).
 Those matter on a corpus written for agents to read, which is a 2026 problem, not
 a 1989 one.
+
+## Use it as a library
+
+The unit model and the search are a package, so a program can search markdown by unit
+without a shell between it and the pattern -- the text most likely to lose a backslash on
+the way:
+
+```go
+import "github.com/emezav/markgrep/search"
+
+r, err := search.Run("docs/", []string{"rule of thumb"}, search.Options{
+    Literal: true,
+    Exclude: []string{"CHANGELOG.md"},
+    Control: []string{"known phrase"},
+})
+// r.Files and r.Units: the corpus after the filters.
+// r.Matches: each unit with its path, line, kind, heading and text.
+// r.Grep: the equivalent grep command, one per phrasing.
+```
+
+Every refusal is an error, never an empty result: an unknown kind, a malformed or dead
+glob (`errors.Is(err, search.ErrFilterMatchesNothing)`), a control that found nothing
+(`search.ErrControlFailed`). Pinning the module version in your `go.mod` records which
+markgrep you search with. The CLI is a thin layer over `Run`.
 
 ## Roadmap
 

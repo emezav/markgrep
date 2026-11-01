@@ -3,17 +3,18 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/emezav/markgrep/search"
 )
 
-const version = "0.11.1"
+const version = "0.12.0"
 
 // usage is built rather than written, because the list of kinds had two homes
 // and they drifted: adding `html` updated Kinds and left the help text stale.
 // A validated flag whose help text lists the wrong names is worse than an
 // unvalidated one -- it refuses a name it does not advertise.
-var usage = strings.Replace(usageTemplate, "{{kinds}}", strings.Join(Kinds, " | "), 1)
+var usage = strings.Replace(usageTemplate, "{{kinds}}", strings.Join(search.Kinds, " | "), 1)
 
 const usageTemplate = `markgrep ` + version + ` -- grep for markdown prose: searches units, not lines.
 
@@ -31,8 +32,9 @@ read "unit"):
   -r               recursive (already the default; accepted and ignored)
   -i               case insensitive (already the default; see the difference below)
   -s               case SENSITIVE
-  --include GLOB   restrict by file name
-  --exclude GLOB   skip by file name
+  --include GLOB   restrict by file name; repeatable, a file passes if it matches any
+  --exclude GLOB   skip by file name; repeatable
+                   a glob that matches no file, or is malformed, is an error (exit 2)
 
 Own:
   --in PATH        file or directory (default: .)
@@ -40,6 +42,9 @@ Own:
                    one unit per table ROW; unknown names are refused, not ignored
   --links MODE     text (default) | url | both -- what a [text](url) contributes
   --raw            print the unit with its line breaks; flattened by default
+  --control PHRASE a phrase known to be in the corpus; repeatable. Matched with the
+                   same options (not -v). If one matches nothing, the search fails
+                   with exit 2 and reports nothing
 
 INLINE EMPHASIS IS REMOVED BEFORE MATCHING -- asterisk, backtick and tilde -- so a
 pattern copied from --raw or from the source does not match in regex mode:
@@ -57,7 +62,8 @@ Here the context IS the unit and the result IS the unit, so those flags have no
 translation. They are rejected with an explanation instead of half-implemented.
 
 Exit codes:  0 = matches   1 = no matches
-             2 = error, BROKEN detector, or nothing could measure the input
+             2 = error, BROKEN detector, nothing could measure the input,
+                 a filter that filters nothing, or a failed --control
 
 It emits no verdicts: it says what is there and where it lives. The fallback is
 always grep, and every output prints the equivalent command.
@@ -91,40 +97,6 @@ func main() {
 	}
 }
 
-// checkKinds validates a --kind spec against the known kinds.
-//
-// The alternative is worse than it looks: an unknown name filters every unit
-// out and the run reports zero matches, which is indistinguishable from a
-// corpus that genuinely does not contain the phrase. That is the exact failure
-// this tool exists to remove, so it must not be the way a typo behaves.
-func checkKinds(spec string) error {
-	if spec == "" || spec == "any" {
-		return nil
-	}
-	for _, k := range strings.Split(spec, ",") {
-		k = strings.TrimSpace(k)
-		known := k == "any"
-		for _, valid := range Kinds {
-			if k == valid {
-				known = true
-			}
-		}
-		if !known {
-			return fmt.Errorf("unknown --kind %q; known kinds: %s, any",
-				k, strings.Join(Kinds, ", "))
-		}
-	}
-	return nil
-}
-
-func checkLinks(mode string) error {
-	switch mode {
-	case "", LinksText, LinksURL, LinksBoth:
-		return nil
-	}
-	return fmt.Errorf("unknown --links %q; use %s, %s or %s", mode, LinksText, LinksURL, LinksBoth)
-}
-
 func at(args []string, i int) string {
 	if i < len(args) {
 		return args[i]
@@ -134,8 +106,9 @@ func at(args []string, i int) string {
 
 func cmdSearch(args []string) {
 	var pats []string
-	root, raw := ".", false
-	o := Options{Kind: "any"}
+	root := "."
+	var out Output
+	o := search.Options{Kind: "any"}
 
 	for i := 0; i < len(args); i++ {
 		a := args[i]
@@ -152,18 +125,21 @@ func cmdSearch(args []string) {
 		case "-v":
 			o.Invert = true
 		case "-l":
-			o.FilesOnly = true
+			out.FilesOnly = true
 		case "-c":
-			o.Count = true
+			out.Count = true
 		case "-r", "-R", "-i":
 			// accepted with no effect: already the default behaviour
 		case "-s":
 			o.CaseSens = true
 		case "--include":
-			o.Include = at(args, i+1)
+			o.Include = append(o.Include, at(args, i+1))
 			i++
 		case "--exclude":
-			o.Exclude = at(args, i+1)
+			o.Exclude = append(o.Exclude, at(args, i+1))
+			i++
+		case "--control":
+			o.Control = append(o.Control, at(args, i+1))
 			i++
 		case "--in":
 			root = at(args, i+1)
@@ -175,7 +151,7 @@ func cmdSearch(args []string) {
 			o.Links = at(args, i+1)
 			i++
 		case "--raw":
-			raw = true
+			out.Raw = true
 		default:
 			if !strings.HasPrefix(a, "-") {
 				pats = append(pats, a)
@@ -185,73 +161,22 @@ func cmdSearch(args []string) {
 			}
 		}
 	}
-	if len(pats) == 0 {
-		fmt.Fprintln(os.Stderr, "at least one pattern is required (-e/-f)")
-		os.Exit(2)
-	}
-	// A name we do not know would filter everything out and report zero, which
-	// reads exactly like "there is nothing there". Refuse instead.
-	if err := checkKinds(o.Kind); err != nil {
+
+	// Every refusal -- an unknown kind, a malformed or dead glob, a control
+	// that found nothing -- is exit 2, because each of them would otherwise
+	// have reported a zero that reads exactly like "there is nothing there".
+	r, err := search.Run(root, pats, o)
+	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
 	}
-	if err := checkLinks(o.Links); err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		os.Exit(2)
+	if !out.Count && !out.FilesOnly {
+		fmt.Printf("corpus: %d files, %d units\n", len(r.Files), r.Units)
 	}
-
-	units, files, err := Collect(root)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "read error:", err)
-		os.Exit(2)
-	}
-	units, files = filterFiles(units, files, o)
-
-	if !o.Count && !o.FilesOnly {
-		fmt.Printf("corpus: %d files, %d units\n", len(files), len(units))
-	}
-	ms, err := Search(units, pats, o)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(2)
-	}
-	PrintMatches(os.Stdout, ms, pats, root, raw, o)
-	if len(ms) == 0 {
+	PrintMatches(os.Stdout, r, pats, root, out, o)
+	if len(r.Matches) == 0 {
 		os.Exit(1)
 	}
-}
-
-func filterFiles(u []Unit, f []string, o Options) ([]Unit, []string) {
-	if o.Include == "" && o.Exclude == "" {
-		return u, f
-	}
-	ok := func(path string) bool {
-		base := filepath.Base(path)
-		if o.Include != "" {
-			if m, _ := filepath.Match(o.Include, base); !m {
-				return false
-			}
-		}
-		if o.Exclude != "" {
-			if m, _ := filepath.Match(o.Exclude, base); m {
-				return false
-			}
-		}
-		return true
-	}
-	var uu []Unit
-	for _, x := range u {
-		if ok(x.Path) {
-			uu = append(uu, x)
-		}
-	}
-	var ff []string
-	for _, x := range f {
-		if ok(x) {
-			ff = append(ff, x)
-		}
-	}
-	return uu, ff
 }
 
 func cmdVerify(args []string) {
